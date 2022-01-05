@@ -8,12 +8,12 @@ GenoType Blocking Compressor (简称 GBC) 是一个基因型数据分块压缩�
 
 ### 1. 下载 GBC 及相关文件
 
-| Type                        | File                                  | Size     |
-| --------------------------- | ------------------------------------- | -------- |
-| Source codes                | [gbc.zip](./download/source-code.zip) | 7.25 MB  |
-| Example                     | [Instance](./download/example.zip)    | 16.49 MB |
-| Docker Images (Docker File) | [Dockerfile](./download/dockerfile)   | 282 B    |
-| old gbc (version 1.0)       | [gbc-1.0.jar](./download/gbc-1.0.jar) | 7.57 MB  |
+| Type                        | File                                                         |
+| --------------------------- | ------------------------------------------------------------ |
+| Source codes                | [GBC-1.1](https://github.com/Zhangliubin/Genotype-Blocking-Compressor) |
+| Example                     | [Instance](http://pmglab.top/gbc/download/example.zip)       |
+| Docker Images (Docker File) | [Dockerfile](http://pmglab.top/gbc/download/dockerfile)      |
+| Package/Software            | [gbc-1.1.jar](./download/gbc-1.1.jar)                        |
 
 ### 2. 系统要求
 
