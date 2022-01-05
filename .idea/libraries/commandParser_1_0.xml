@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="commandParser-1.0">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/../../commandParser-1.0/commandParser-1.0.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
