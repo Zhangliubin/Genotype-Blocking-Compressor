@@ -30,8 +30,18 @@ enum IndexFunction {
             System.out.println(usage());
         } else {
             ChromosomeInfo.load((String) options.get("-from"));
+            boolean isGTB = false;
 
-            if (options.isPassedIn("-to")) {
+            // 判断是否为 GTB 文件，如果不是 GTB 文件，则使用转换方法
+            try {
+                GTBManager manager = GTBRootCache.get((String) options.get("index"));
+                isGTB = true;
+            } catch (Exception ignored) {
+                isGTB = false;
+            }
+
+            if (isGTB) {
+                // 重叠群转换
                 String realOutputFileName = options.isPassedIn("-o") ? (String) options.get("-o") : (String) options.get("index");
 
                 if (!(boolean) options.isPassedIn("-y")) {
@@ -58,6 +68,7 @@ enum IndexFunction {
                 // 修改文件名
                 FileUtils.rename(realOutputFileName + ".~$temp", realOutputFileName);
             } else {
+                // build contig for VCF
                 String realOutputFileName = options.isPassedIn("-o") ? (String) options.get("-o") : FileUtils.fixExtension((String) options.get("index"), ".contig", ".vcf.gz", ".vcf", ".gz");
 
                 // 判断输出文件是否存在

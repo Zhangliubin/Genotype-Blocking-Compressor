@@ -86,5 +86,7 @@ public interface ITask {
      * 自动生成输出文件名
      * @return 文件名
      */
-    String autoGenerateOutputFileName();
+    default String autoGenerateOutputFileName() {
+        return null;
+    };
 }

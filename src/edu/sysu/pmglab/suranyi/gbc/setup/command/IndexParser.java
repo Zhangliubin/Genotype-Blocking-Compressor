@@ -33,7 +33,7 @@ enum IndexParser {
     IndexParser() {
         // global options
         parser = new CommandParser(false);
-        parser.setProgramName("index <input>");
+        parser.setProgramName("index <input (VCF or GTB)>");
         parser.offset(0);
         parser.debug(false);
         parser.usingAt(true);
@@ -68,6 +68,7 @@ enum IndexParser {
         parser.register("--to-contig", "-to")
                 .arity(1)
                 .convertTo(new StringConverter())
+                .defaultTo(ChromosomeInfo.DEFAULT_FILE)
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
                 .setOptionGroup("Options")
                 .setDescription("Reset contig (chromosome marker in each gtb block header) for gtb file directly.")

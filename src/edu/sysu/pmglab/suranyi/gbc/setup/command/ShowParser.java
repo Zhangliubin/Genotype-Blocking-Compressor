@@ -43,16 +43,16 @@ enum ShowParser {
 
         // add commandItems
         parser.register("--help", "-help", "-h")
-              .addOptions(HIDDEN, HELP)
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options");
+                .addOptions(HIDDEN, HELP)
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Options");
         parser.register("show")
-              .addOptions(REQUEST, HIDDEN)
-              .arity(1)
-              .convertTo(new StringConverter())
-              .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
-              .setOptionGroup("Options");
+                .addOptions(REQUEST, HIDDEN)
+                .arity(1)
+                .convertTo(new StringConverter())
+                .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
+                .setOptionGroup("Options");
         parser.register("--contig")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -62,59 +62,65 @@ enum ShowParser {
                 .setDescription("Specify the corresponding contig file.")
                 .setFormat("'--contig <file>'");
         parser.register("--list-md5")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print the message-digest fingerprint (checksum) for file (which may take a long time to calculating for huge files).");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print the message-digest fingerprint (checksum) for file (which may take a long time to calculating for huge files).");
         parser.register("--list-baseInfo")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print the basic information of the GTB file (by default, only print the state of phased and random access enable).");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print the basic information of the GTB file (by default, only print the state of phased and random access enable).");
         parser.register("--list-subject")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print subjects names of the GTB file.");
-        parser.register("--list-subject-only")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print subjects names of the GTB file only.");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print subjects names of the GTB file.");
         parser.register("--list-tree")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print information of the GTBTrees (chromosome only by default).");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print information of the GTBTrees (chromosome only by default).");
         parser.register("--list-node")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print information of the GTBNodes.");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print information of the GTBNodes.");
         parser.register("--assign-chromosome")
-              .arity(1)
-              .convertTo(new StringArrayConverter(","))
-              .setOptionGroup("Options")
-              .setDescription("Print information of the specified chromosome nodes.")
-              .setFormat("'--assign-chromosome <string>,<string>,...'");
+                .arity(1)
+                .convertTo(new StringArrayConverter(","))
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print information of the specified chromosome nodes.")
+                .setFormat("'--assign-chromosome <string>,<string>,...'");
         parser.register("--full", "-f")
-              .arity(0)
-              .convertTo(new PassedInConverter())
-              .setOptionGroup("Options")
-              .setDescription("Print all information of the GTB file (except md5).");
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Summary View Options")
+                .setDescription("Print all abstract information of the GTB file (i.e., --list-baseInfo, --list-subject, --list-node).");
+        parser.register("--list-subject-only")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("GTB View Options")
+                .setDescription("Print subjects names of the GTB file only.");
+        parser.register("--list-position-only")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("GTB View Options")
+                .setDescription("Print coordinates (i.e., CHROM,POSITION) of the GTB file only.");
+        parser.register("--list-site")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("GTB View Options")
+                .setDescription("Print coordinates (i.e., CHROM,POSITION) of the GTB file only.");
 
         // add commandRules
-        parser.registerRule("--list-md5", "--list-subject-only", AT_MOST_ONE);
-        parser.registerRule("--list-baseInfo", "--list-subject-only", AT_MOST_ONE);
-        parser.registerRule("--list-subject", "--list-subject-only", AT_MOST_ONE);
-        parser.registerRule("--list-subject-only", "--list-tree", AT_MOST_ONE);
-        parser.registerRule("--list-subject-only", "--list-node", AT_MOST_ONE);
-        parser.registerRule("--list-subject-only", "--assign-chromosome", AT_MOST_ONE);
-        parser.registerRule("--list-subject-only", "--full", AT_MOST_ONE);
-        parser.registerRule("--list-baseInfo", "--full", AT_MOST_ONE);
-        parser.registerRule("--list-subject", "--full", AT_MOST_ONE);
-        parser.registerRule("--list-tree", "--full", AT_MOST_ONE);
-        parser.registerRule("--list-node", "--full", AT_MOST_ONE);
-        parser.registerRule("--assign-chromosome", "--full", AT_MOST_ONE);
+        parser.registerRule("--list-subject-only", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--assign-chromosome", "--full"}, AT_MOST_ONE);
+        parser.registerRule("--list-position-only", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--full", "--list-subject-only"}, AT_MOST_ONE);
+        parser.registerRule("--list-site", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--full", "--list-subject-only", "--list-position-only"}, AT_MOST_ONE);
+        parser.registerRule("--full", new String[]{"--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--assign-chromosome"}, AT_MOST_ONE);
+    }
+
+    public static void main(String[] args) {
+        toFile("/Users/suranyi/Desktop/ShowParser.cp");
     }
 }

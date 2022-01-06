@@ -6,9 +6,9 @@ import edu.sysu.pmglab.suranyi.easytools.ValueUtils;
 import edu.sysu.pmglab.suranyi.gbc.coder.encoder.MBEGEncoder;
 
 /**
- * @Data        :2021/05/31
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
+ * @Data :2021/05/31
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
  * @Description :位点数据
  */
 
@@ -42,6 +42,7 @@ public class VariantAbstract {
 
     /**
      * 构造器方法
+     *
      * @param validSubjectNum 有效样本数
      */
     public VariantAbstract(final int validSubjectNum) {
@@ -53,8 +54,9 @@ public class VariantAbstract {
 
     /**
      * 构造器方法
+     *
      * @param validSubjectNum 有效样本数
-     * @param windowSize 采样窗口大小
+     * @param windowSize      采样窗口大小
      */
     public VariantAbstract(final int validSubjectNum, final int windowSize) {
         this.encodedStart = 0;
@@ -67,9 +69,10 @@ public class VariantAbstract {
 
     /**
      * 构造器方法
+     *
      * @param validSubjectNum 有效样本数
-     * @param featureLength 特征向量长度
-     * @param windowSize 采样窗口大小
+     * @param featureLength   特征向量长度
+     * @param windowSize      采样窗口大小
      */
     public VariantAbstract(final int validSubjectNum, final int windowSize, final int featureLength) {
         this.encodedStart = 0;
@@ -87,6 +90,7 @@ public class VariantAbstract {
 
     /**
      * 提取等位基因序列，并写入到目标容器中
+     *
      * @param dst 目标容器
      */
     public void writeAlleleTo(final VolumeByteStream dst) {
@@ -112,6 +116,7 @@ public class VariantAbstract {
 
     /**
      * 比对两个位点的顺序
+     *
      * @param v1 第一个比对位点
      * @param v2 第二个比对位点
      */
@@ -132,10 +137,12 @@ public class VariantAbstract {
                 this.blockCounts[i] += encoder.scoreOf(encodedCache[encodedStart + j] & 0xFF) * (upBound - j);
             }
         }
+
     }
 
     /**
      * 比对两个位点的顺序
+     *
      * @param v1 第一个比对位点
      * @param v2 第二个比对位点
      */

@@ -205,7 +205,7 @@ public class GTBSubjectManager {
      * 获取所有的样本名
      */
     public String[] getAllSubjects() {
-        return ArrayUtils.getMapKey(this.subjectsIndexBiDict.getKeys());
+        return new String(subjects).split("\t");
     }
 
     /**

@@ -5,6 +5,8 @@ import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.ManagerStringBuilder;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.GTBReader;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
 
 import java.io.IOException;
 
@@ -33,6 +35,37 @@ enum ShowFunction {
             // 仅打印样本信息
             if (options.isPassedIn("--list-subject-only")) {
                 System.out.println(new String(GTBRootCache.get((String) options.get("show")).getSubjects()).replace("\t", ","));
+                return 0;
+            }
+
+            // 仅打印位置信息
+            if (options.isPassedIn("--list-position-only")) {
+                GTBReader reader = new GTBReader((String) options.get("show"));
+                reader.selectSubjects(new int[]{});
+
+                if (options.isPassedIn("--assign-chromosome")) {
+                    reader.limit((String[]) options.get("--assign-chromosome"));
+                }
+
+                for (Variant variant : reader) {
+                    System.out.println(variant.chromosome + "\t" + variant.position);
+                }
+
+                return 0;
+            }
+
+            // 仅打印位置信息
+            if (options.isPassedIn("--list-site")) {
+                GTBReader reader = new GTBReader((String) options.get("show"));
+
+                if (options.isPassedIn("--assign-chromosome")) {
+                    reader.limit((String[]) options.get("--assign-chromosome"));
+                }
+
+                for (Variant variant : reader) {
+                    System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN());
+                }
+
                 return 0;
             }
 

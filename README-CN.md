@@ -17,9 +17,7 @@ GenoType Blocking Compressor (简称 GBC) 是一个基因型数据分块压缩�
 
 ### 2. 系统要求
 
-- ZSTD 是 Facebook 的 Yann Colle 基于 c 语言开发的一个无损数据压缩算法，它以 Java Native Interface 的形式接入到 Java 中进行使用（即 [zstd-jni](https://github.com/luben/zstd-jni)）。zstd-jni 的维护者 Luben 发布了 [免编译版的 jar 包程序](https://repo1.maven.org/maven2/com/github/luben/zstd-jni/)。gbc 集成了 [zstd-jni-1.4.9-5.jar](https://repo1.maven.org/maven2/com/github/luben/zstd-jni/1.4.9-5/zstd-jni-1.4.9-5.jar)，该版本在多数计算机设备上都可以免编译使用。对于无法正常驱动 ZSTD 的系统，我们提供了 LZMA 压缩的版本作为替代，仅需在压缩时添加参数 `-c LZMA` 或 `-c 1`。
-
-- GBC 是基于 Oracle JDK 8 开发的程序，任何支持或兼容 Oracle JDK 8 的计算机设备都可以使用。用户需要先下载安装 [Oracle JDK](https://www.oracle.com/cn/java/technologies/javase-downloads.html) 或 [Open JDK](https://openjdk.java.net/install/)。Apple Silicon 设备可以使用 [zulu JDK](https://www.azul.com/downloads/?package=jdk#download-openjdk) 作为替代。
+GBC 是基于 Oracle JDK 8 开发的程序，任何支持或兼容 Oracle JDK 8 的计算机设备都可以使用。用户需要先下载安装 [Oracle JDK](https://www.oracle.com/cn/java/technologies/javase-downloads.html) 或 [Open JDK](https://openjdk.java.net/install/)。Apple Silicon 设备可以使用 [zulu JDK](https://www.azul.com/downloads/?package=jdk#download-openjdk) 作为替代。
 
 ### 3. 运行要求
 
@@ -75,27 +73,24 @@ GBC 拥有四种界面模式（或使用方式）：命令行模式、命令行�
   - 配置 JDK 环境变量后，图形界面操作系统可以双击启动界面模式，但此时无法指定运行内存大小
   - 使用命令行启动界面模式：`java -Xms4g -Xmx4g -jar gbc.jar`
 
-
-![setup](images/setup.jpg)
-
 - API 工具：通过导入本 gbc.jar 包使用
 
 ## III. 使用 GBC 处理基因型数据
 
 GBC 的四种界面模式提供以下运行方式，每次运行时至多指定一种运行模式，详见参数一览表：
 
-| 运行模式 | 指令                                                  | 说明                                     |
-| -------- | ----------------------------------------------------- | ---------------------------------------- |
-| build    | build <inputFileName1, inputFileName2, ...> [options] | 构建GTB存档                              |
-| rebuild  | rebuild \<inputFileName\> [options]                   | 从 GTB 文件中重构建 GTB 存档             |
-| merge    | merge <GTBFileName1, GTBFileName2, ...> [options]     | 合并多个具有不重叠样本的 GTB 文件        |
-| show     | show <inputFileName1, inputFileName2, ...> [options]  | 查看 GTB 文件结构                        |
-| extract  | extract \<inputFileName\> [options]                   | 提取基因组数据                           |
-| edit     | edit \<inputFileName\> [options]                      | GTB 文件编辑                             |
-| ld       | ld \<inputFileName\> [options]                        | 计算 LD 系数                             |
-| index    | index \<inputFileName\> [options]                     | 构建与管理 contig 文件                   |
-| bgzip    | bgzip \<inputFileName\> [options]                     | 使用 Pbgzip 进行压缩、解压、切割 gz 文件 |
-| md5      | md5 <inputFileName1, inputFileName2, ...> [options]   | 校验文件的 MD5 码                        |
+| 运行模式 | 指令                                                | 说明                                     |
+| -------- | --------------------------------------------------- | ---------------------------------------- |
+| build    | build \<input(s)\> [options]                        | 构建GTB存档                              |
+| rebuild  | rebuild \<input\> [options]                         | 从 GTB 文件中重构建 GTB 存档             |
+| merge    | merge <input(s)> [options]                          | 合并多个具有不重叠样本的 GTB 文件        |
+| show     | show <input(s)> [options]                           | 查看 GTB 文件结构                        |
+| extract  | extract \<input\> [options]                         | 提取基因组数据                           |
+| edit     | edit \<input\> [options]                            | GTB 文件编辑                             |
+| ld       | ld \<input\> [options]                              | 计算 LD 系数                             |
+| index    | index \<input\> [options]                           | 构建与管理 contig 文件                   |
+| bgzip    | bgzip \<input\> [options]                           | 使用 Pbgzip 进行压缩、解压、切割 gz 文件 |
+| md5      | md5 <inputFileName1, inputFileName2, ...> [options] | 校验文件的 MD5 码                        |
 
 ### 1. 构建压缩的 GTB 文件 —— build 运行模式
 
@@ -655,7 +650,7 @@ GBC md5 <inputFileName1, inputFileName2, ...> [--o-md5]
 ## V. API 文档
 
 - commandParser: http://pmglab.top/commandParser/
-- unifyIO:
+- unifyIO: http://pmglab.top/commandParser/supports/unifyIO
 - 
 
  

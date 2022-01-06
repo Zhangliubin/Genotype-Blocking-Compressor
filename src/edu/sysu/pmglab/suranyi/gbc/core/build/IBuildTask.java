@@ -407,5 +407,7 @@ public abstract class IBuildTask implements ITask {
     /**
      * 提交任务
      */
-    public abstract void submit() throws IOException;
+    public void submit() throws IOException {
+
+    }
 }

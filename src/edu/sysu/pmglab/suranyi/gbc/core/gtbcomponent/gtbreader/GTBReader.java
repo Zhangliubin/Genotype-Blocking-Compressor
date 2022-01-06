@@ -7,7 +7,6 @@ import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
 import edu.sysu.pmglab.suranyi.gbc.coder.BEGTransfer;
 import edu.sysu.pmglab.suranyi.gbc.coder.decoder.MBEGDecoder;
-import edu.sysu.pmglab.suranyi.gbc.constant.Chromosome;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GBCExceptionOptions;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GTBComponentException;
@@ -19,6 +18,7 @@ import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Iterator;
 
 /**
  * @Data        :2021/08/14
@@ -27,7 +27,7 @@ import java.util.Collection;
  * @Description :GTB 读取器
  */
 
-public class GTBReader implements Closeable, AutoCloseable {
+public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
     private final GTBManager manager;
     private final MBEGDecoder groupDecoder;
     private final boolean phased;
@@ -165,7 +165,6 @@ public class GTBReader implements Closeable, AutoCloseable {
      * @param endNodeIndex 限定访问的节点终止范围
      */
     public void limit(int chromosomeIndex, int startNodeIndex, int endNodeIndex) {
-        Chromosome info = ChromosomeInfo.get(chromosomeIndex);
         Assert.that(manager.contain(chromosomeIndex), GBCExceptionOptions.GTBComponentException, "chromosome=" + ChromosomeInfo.getString(chromosomeIndex) + " (index=" + chromosomeIndex + ") not in current GTB file");
         this.pointer = new LimitPointer(this.manager, new int[]{chromosomeIndex}, startNodeIndex, endNodeIndex);
     }
@@ -178,7 +177,7 @@ public class GTBReader implements Closeable, AutoCloseable {
         headerCache.write(("##fileformat=VCFv4.2" +
                 "\n##FILTER=<ID=PASS,Description=\"All filters passed\">" +
                 "\n##source=" + this.manager.getFileName() +
-                "\n##Version=<gbc_version=1.5,java_version=" + System.getProperty("java.version") + ",zstd_jni=1.4.9-5>"));
+                "\n##Version=<gbc_version=1.1,java_version=" + System.getProperty("java.version") + ",zstd_jni=1.4.9-5>"));
 
         // 参考序列非空时，写入参考序列
         if (!this.manager.isReferenceEmpty()) {
@@ -492,6 +491,25 @@ public class GTBReader implements Closeable, AutoCloseable {
     public void close() throws IOException {
         this.cache.close();
         this.pointer = null;
+    }
+
+    @Override
+    public Iterator<Variant> iterator() {
+        return new Iterator<Variant>() {
+            @Override
+            public boolean hasNext() {
+                return pointer.chromosomeIndex != -1;
+            }
+
+            @Override
+            public Variant next() {
+                try {
+                    return readVariant();
+                } catch (IOException e) {
+                    throw new GTBComponentException(e.getMessage());
+                }
+            }
+        };
     }
 }
 

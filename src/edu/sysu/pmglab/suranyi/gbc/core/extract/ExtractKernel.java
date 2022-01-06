@@ -315,7 +315,7 @@ class ExtractKernel {
         cache.write(("##fileformat=VCFv4.2" +
                 "\n##FILTER=<ID=PASS,Description=\"All filters passed\">" +
                 "\n##source=" + this.task.getInputFileName() +
-                "\n##Version=<gbc_version=1.5,java_version=" + System.getProperty("java.version") + ",zstd_jni=1.4.9-5>"));
+                "\n##Version=<gbc_version=1.1,java_version=" + System.getProperty("java.version") + ",zstd_jni=1.4.9-5>"));
 
         // 参考序列非空时，写入参考序列
         if (!this.gtbManager.isReferenceEmpty()) {
