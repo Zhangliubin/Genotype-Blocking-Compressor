@@ -352,9 +352,6 @@ public class Variant {
                 finalALT.write(oldMatchers[id1]);
             }
             ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
-            newMatchers = null;
-            oldMatchers = null;
-            finalALT = null;
 
             // 转换编码
             BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
