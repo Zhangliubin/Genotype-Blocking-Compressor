@@ -70,6 +70,6 @@ public class GTBReferenceManager {
 
     @Override
     public String toString() {
-        return this.reference.toString();
+        return new String(reference.values());
     }
 }

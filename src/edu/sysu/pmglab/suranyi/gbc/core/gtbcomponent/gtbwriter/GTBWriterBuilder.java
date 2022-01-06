@@ -1,5 +1,6 @@
 package edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter;
 
+import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
 import edu.sysu.pmglab.suranyi.gbc.core.build.IBuildTask;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBReferenceManager;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBSubjectManager;
@@ -32,6 +33,13 @@ public class GTBWriterBuilder extends IBuildTask {
     }
 
     public GTBWriterBuilder setReference(String reference) {
+        referenceManager = new GTBReferenceManager();
+        referenceManager.load(reference);
+
+        return this;
+    }
+
+    public GTBWriterBuilder setReference(VolumeByteStream reference) {
         referenceManager = new GTBReferenceManager();
         referenceManager.load(reference);
 
