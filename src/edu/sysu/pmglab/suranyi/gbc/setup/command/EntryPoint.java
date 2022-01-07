@@ -1,6 +1,6 @@
 package edu.sysu.pmglab.suranyi.gbc.setup.command;
 
-import dev.fromcommandfile.BGZIPCommandEntry;
+import dev.fromjavascript.BGZIPCommandEntry;
 import edu.sysu.pmglab.suranyi.commandParser.CommandMatcher;
 import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 

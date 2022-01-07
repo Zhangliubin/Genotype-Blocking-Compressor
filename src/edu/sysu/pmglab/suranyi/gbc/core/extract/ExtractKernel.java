@@ -84,7 +84,7 @@ class ExtractKernel {
             try {
                 kernel.inputPipeline.putStatus(task.getThreads(), false);
             } catch (InterruptedException e) {
-                e.printStackTrace();  // 调试使用
+                // e.printStackTrace();  // 调试使用
                 throw new UnsupportedOperationException(e.getMessage());
             }
         });
@@ -101,7 +101,7 @@ class ExtractKernel {
             try {
                 kernel.inputPipeline.putStatus(task.getThreads(), false);
             } catch (InterruptedException e) {
-                e.printStackTrace();  // 调试使用
+                // e.printStackTrace();  // 调试使用
                 throw new UnsupportedOperationException(e.getMessage());
             }
         });
@@ -118,7 +118,7 @@ class ExtractKernel {
             try {
                 kernel.inputPipeline.putStatus(task.getThreads(), false);
             } catch (InterruptedException e) {
-                e.printStackTrace();  // 调试使用
+                // e.printStackTrace();  // 调试使用
                 throw new UnsupportedOperationException(e.getMessage());
             }
         });
@@ -136,7 +136,7 @@ class ExtractKernel {
             try {
                 kernel.inputPipeline.putStatus(task.getThreads(), false);
             } catch (InterruptedException e) {
-                e.printStackTrace();  // 调试使用
+                // e.printStackTrace();  // 调试使用
                 throw new UnsupportedOperationException(e.getMessage());
             }
         });
@@ -154,7 +154,7 @@ class ExtractKernel {
             try {
                 kernel.inputPipeline.putStatus(task.getThreads(), false);
             } catch (InterruptedException e) {
-                e.printStackTrace();  // 调试使用
+                // e.printStackTrace();  // 调试使用
                 throw new UnsupportedOperationException(e.getMessage());
             }
         });
@@ -299,7 +299,7 @@ class ExtractKernel {
                 globalCache.freeMemory();
             }
         } catch (InterruptedException | IOException e) {
-            e.printStackTrace();  // 调试使用
+            // e.printStackTrace();  // 调试使用
             throw new UnsupportedOperationException(e.getMessage());
         }
     }
