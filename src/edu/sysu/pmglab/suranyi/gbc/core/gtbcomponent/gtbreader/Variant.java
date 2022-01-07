@@ -276,8 +276,8 @@ public class Variant {
      * 横向合并位点 (认为它们来自不同的测序样本)
      * @param otherVariant 另一个变异位点
      */
-    public void merge(Variant otherVariant) {
-        merge(otherVariant, true);
+    public Variant merge(Variant otherVariant) {
+        return merge(otherVariant, true);
     }
 
     /**
@@ -285,14 +285,22 @@ public class Variant {
      * @param otherVariant 另一个变异位点
      * @param verifyCoordinate 是否验证坐标
      */
-    public void merge(final Variant otherVariant, boolean verifyCoordinate) {
+    public Variant merge(final Variant otherVariant, boolean verifyCoordinate) {
         if (verifyCoordinate && !(otherVariant.chromosome.equals(this.chromosome) && (otherVariant.position == this.position))) {
             throw new UnsupportedOperationException("Requests to merge variant with different coordinates are not allowed.");
         }
 
+        Variant mergeVariant = new Variant();
+        mergeVariant.chromosome = this.chromosome;
+        mergeVariant.position = this.position;
+        mergeVariant.ploidy = this.ploidy;
+        mergeVariant.phased = this.phased;
+
         // 传入位点作为主位点
         if ((ArrayUtils.equal(REF, otherVariant.REF) && (ArrayUtils.equal(ALT, otherVariant.ALT)))) {
-            this.BEGs = ArrayUtils.merge(this.BEGs, otherVariant.BEGs);
+            mergeVariant.REF = this.REF;
+            mergeVariant.ALT = this.ALT;
+            mergeVariant.BEGs = ArrayUtils.merge(this.BEGs, otherVariant.BEGs);
         } else {
             // 获取等位基因个数
             int allelesNum = getAlternativeAlleleNum();
@@ -351,17 +359,18 @@ public class Variant {
                 finalALT.write(ByteCode.COMMA);
                 finalALT.write(oldMatchers[id1]);
             }
-            ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
+            mergeVariant.REF = this.REF;
+            mergeVariant.ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
 
             // 转换编码
             BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
-            byte[] newBEGs = new byte[this.BEGs.length + otherVariant.BEGs.length];
-            System.arraycopy(this.BEGs, 0, newBEGs, 0, this.BEGs.length);
+            mergeVariant.BEGs = new byte[this.BEGs.length + otherVariant.BEGs.length];
+            System.arraycopy(this.BEGs, 0, mergeVariant.BEGs, 0, this.BEGs.length);
             for (int i = 0; i < otherVariant.BEGs.length; i++) {
-                newBEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
+                mergeVariant.BEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
             }
-            this.BEGs = newBEGs;
         }
+        return mergeVariant;
     }
 
     /**

@@ -1,6 +1,6 @@
 package edu.sysu.pmglab.suranyi.gbc.setup.command;
 
-import dev.fromjavascript.BGZIPCommandEntry;
+import dev.fromcommandfile.BGZIPCommandEntry;
 import edu.sysu.pmglab.suranyi.commandParser.CommandMatcher;
 import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 
@@ -48,6 +48,8 @@ public enum EntryPoint {
                 MD5Function.submit(args);
             } else if (options.isPassedIn("version")) {
                 System.out.println("Version: GBC-1.1 (last edited on 2022.01.15)");
+            } else if (options.isPassedIn("workflow")) {
+                WorkFlowFunction.submit(args);
             } else if (options.isPassedIn("-h")) {
                 System.out.println(INSTANCE.parser);
             }

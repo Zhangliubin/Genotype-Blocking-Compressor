@@ -94,6 +94,11 @@ enum EntryPointParser {
               .convertTo(new StringArrayConverter())
               .setOptionGroup("Tool")
               .setDescription("Use parallel bgzip to compress a single file.");
+        parser.register("workflow")
+                .arity(-1)
+                .convertTo(new StringArrayConverter())
+                .setOptionGroup("Tool")
+                .setDescription("Utilities set developed based on GTB.");
         parser.register("md5")
               .arity(-1)
               .convertTo(new StringArrayConverter())

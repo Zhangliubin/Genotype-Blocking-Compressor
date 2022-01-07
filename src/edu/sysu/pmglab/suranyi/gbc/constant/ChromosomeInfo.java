@@ -127,7 +127,12 @@ public enum ChromosomeInfo {
             }
             lineCache.reset();
         }
-        out.write("\n#chromosome,ploidy,length");
+
+        if (searchRef) {
+            out.write("#chromosome,ploidy,length");
+        } else {
+            out.write("\n#chromosome,ploidy,length");
+        }
         out.write(outputCache);
         in.close();
         out.close();

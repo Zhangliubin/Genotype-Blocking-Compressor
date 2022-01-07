@@ -119,8 +119,4 @@ enum ShowParser {
         parser.registerRule("--list-site", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--full", "--list-subject-only", "--list-position-only"}, AT_MOST_ONE);
         parser.registerRule("--full", new String[]{"--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--assign-chromosome"}, AT_MOST_ONE);
     }
-
-    public static void main(String[] args) {
-        toFile("/Users/suranyi/Desktop/ShowParser.cp");
-    }
 }

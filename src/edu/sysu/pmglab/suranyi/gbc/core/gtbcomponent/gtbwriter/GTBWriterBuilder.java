@@ -32,6 +32,13 @@ public class GTBWriterBuilder extends IBuildTask {
         return this;
     }
 
+    public GTBWriterBuilder setSubject(byte[] subjects) {
+        subjectManager = new GTBSubjectManager();
+        subjectManager.load(subjects);
+
+        return this;
+    }
+
     public GTBWriterBuilder setReference(String reference) {
         referenceManager = new GTBReferenceManager();
         referenceManager.load(reference);

@@ -171,7 +171,6 @@ public class GTBWriter implements AutoCloseable {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            // e.printStackTrace();
         }
     }
 
@@ -222,96 +221,104 @@ public class GTBWriter implements AutoCloseable {
     /**
      * 写入一个位点
      */
-    public boolean write(Variant info) throws InterruptedException {
-        if (info.BEGs.length != validSubjectNum) {
-            throw new GTBComponentException("inconsistent sample size");
-        }
+    public boolean write(Variant info) throws IOException {
+        try {
+            if (info.BEGs.length != validSubjectNum) {
+                throw new GTBComponentException("inconsistent sample size");
+            }
 
-        if (currentBlock == null) {
-            currentBlock = this.compressedPipLine.take();
-        }
+            if (currentBlock == null) {
+                currentBlock = this.compressedPipLine.take();
+            }
 
-        if (this.alleleQC.size() != 0) {
-            int alleleCounts = 0;
-            int validAllelesNum = 0;
-            byte code;
-            for (int i = 0; i < info.BEGs.length; i++) {
-                code = info.BEGs[i];
+            if (this.alleleQC.size() != 0) {
+                int alleleCounts = 0;
+                int validAllelesNum = 0;
+                byte code;
+                for (int i = 0; i < info.BEGs.length; i++) {
+                    code = info.BEGs[i];
 
-                if (code != 0) {
-                    validAllelesNum += 1;
+                    if (code != 0) {
+                        validAllelesNum += 1;
 
-                    // 0 等位基因个数
-                    alleleCounts += 2 - this.begEncoder.scoreOf(code);
+                        // 0 等位基因个数
+                        alleleCounts += 2 - this.begEncoder.scoreOf(code);
+                    }
+                }
+
+                // 单倍型
+                if (ChromosomeInfo.getPloidy(ChromosomeInfo.getIndex(info.chromosome)) == 1) {
+                    alleleCounts = alleleCounts >> 1;
+                } else {
+                    // 二倍型
+                    validAllelesNum = validAllelesNum << 1;
+                }
+
+                if (this.alleleQC.filter(alleleCounts, validAllelesNum)) {
+                    return false;
                 }
             }
 
-            // 单倍型
-            if (ChromosomeInfo.getPloidy(ChromosomeInfo.getIndex(info.chromosome)) == 1) {
-                alleleCounts = alleleCounts >> 1;
-            } else {
-                // 二倍型
-                validAllelesNum = validAllelesNum << 1;
+            // 将这个位点写入缓冲
+            int currentVariantChromosome = ChromosomeInfo.getIndex(info.chromosome);
+            if (currentBlock.seek == 0) {
+                currentBlock.chromosomeIndex = currentVariantChromosome;
             }
 
-            if (this.alleleQC.filter(alleleCounts, validAllelesNum)) {
-                return false;
+            if (currentVariantChromosome != currentBlock.chromosomeIndex) {
+                this.uncompressedPipLine.put(true, currentBlock);
+                currentBlock = this.compressedPipLine.take();
+                currentBlock.chromosomeIndex = currentVariantChromosome;
             }
-        }
 
-        // 将这个位点写入缓冲
-        int currentVariantChromosome = ChromosomeInfo.getIndex(info.chromosome);
-        if (currentBlock.seek == 0) {
-            currentBlock.chromosomeIndex = currentVariantChromosome;
-        }
+            VariantAbstract variant = currentBlock.getCurrentVariant();
+            variant.position = info.position;
+            VolumeByteStream alleles = new VolumeByteStream(info.ALT.length + 1 + info.REF.length);
+            alleles.write(info.REF);
+            alleles.write(ByteCode.TAB);
+            alleles.write(info.ALT);
+            variant.setAllele(alleles);
+            variant.encoderIndex = info.getAlternativeAlleleNum() == 2 ? 0 : 1;
+            System.arraycopy(info.BEGs, 0, currentBlock.encodedCache.getCache(), variant.encodedStart, validSubjectNum);
+            currentBlock.seek++;
 
-        if (currentVariantChromosome != currentBlock.chromosomeIndex) {
-            this.uncompressedPipLine.put(true, currentBlock);
-            currentBlock = this.compressedPipLine.take();
-            currentBlock.chromosomeIndex = currentVariantChromosome;
-        }
-
-        VariantAbstract variant = currentBlock.getCurrentVariant();
-        variant.position = info.position;
-        VolumeByteStream alleles = new VolumeByteStream(info.ALT.length + 1 + info.REF.length);
-        alleles.write(info.REF);
-        alleles.write(ByteCode.TAB);
-        alleles.write(info.ALT);
-        variant.setAllele(alleles);
-        variant.encoderIndex = info.getAlternativeAlleleNum() == 2 ? 0 : 1;
-        System.arraycopy(info.BEGs, 0, currentBlock.encodedCache.getCache(), variant.encodedStart, validSubjectNum);
-        currentBlock.seek++;
-
-        if (currentBlock.remaining() == 0) {
-            this.uncompressedPipLine.put(true, currentBlock);
-            currentBlock = null;
+            if (currentBlock.remaining() == 0) {
+                this.uncompressedPipLine.put(true, currentBlock);
+                currentBlock = null;
+            }
+        } catch (InterruptedException e) {
+            throw new IOException(e.getMessage());
         }
 
         return true;
     }
 
     @Override
-    public void close() throws Exception {
-        if (currentBlock != null && !currentBlock.empty()) {
-            this.uncompressedPipLine.put(true, currentBlock);
+    public void close() throws IOException {
+        try {
+            if (currentBlock != null && !currentBlock.empty()) {
+                this.uncompressedPipLine.put(true, currentBlock);
+            }
+
+            // 发送关闭信号
+            this.uncompressedPipLine.putStatus(this.task.getThreads(), false);
+
+            // 关闭线程池，等待任务完成
+            threadPool.close();
+
+            // 回收内存
+            for (int i = 0; i < this.compressedPipLine.size(); i++) {
+                this.compressedPipLine.take().freeMemory();
+            }
+
+            // 清除数据区
+            this.compressedPipLine.clear();
+            this.uncompressedPipLine.clear();
+
+            // 生成最后的 gtb 文件
+            generateGTBFile();
+        } catch (InterruptedException e) {
+            throw new IOException(e.getMessage());
         }
-
-        // 发送关闭信号
-        this.uncompressedPipLine.putStatus(this.task.getThreads(), false);
-
-        // 关闭线程池，等待任务完成
-        threadPool.close();
-
-        // 回收内存
-        for (int i = 0; i < this.compressedPipLine.size(); i++) {
-            this.compressedPipLine.take().freeMemory();
-        }
-
-        // 清除数据区
-        this.compressedPipLine.clear();
-        this.uncompressedPipLine.clear();
-
-        // 生成最后的 gtb 文件
-        generateGTBFile();
     }
 }
