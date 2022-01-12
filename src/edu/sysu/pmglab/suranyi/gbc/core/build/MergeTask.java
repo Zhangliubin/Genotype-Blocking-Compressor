@@ -7,6 +7,7 @@ import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAll
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GBCExceptionOptions;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
+import edu.sysu.pmglab.suranyi.gbc.core.workflow.merge.MergeMultiFileWithCheckAllele;
 
 import java.io.IOException;
 import java.util.Collection;
@@ -20,6 +21,10 @@ import java.util.Collection;
 
 public class MergeTask extends IBuildTask {
     private final SmartList<GTBManager> managers;
+    private boolean checkAf;
+    private double identityAF;
+    private boolean keepAll;
+    private boolean deleteAF0;
 
     private boolean inplace = false;
 
@@ -92,10 +97,70 @@ public class MergeTask extends IBuildTask {
     }
 
     /**
+     * 保留所有位点
+     */
+    public MergeTask setKeepAll(boolean keepAll) {
+        synchronized (this) {
+            this.keepAll = keepAll;
+        }
+        return this;
+    }
+
+    /**
+     * 检查 allele frequency 并进行校正
+     */
+    public MergeTask setCheckAf(boolean checkAf) {
+        synchronized (this) {
+            this.checkAf = checkAf;
+        }
+        return this;
+    }
+
+    /**
+     * 识别为潜在相同碱基的 allele freq gap 阈值
+     */
+    public MergeTask setIdentifyAF(double ideAf) {
+        synchronized (this) {
+            this.identityAF = ideAf;
+        }
+        return this;
+    }
+
+    /**
+     * 删除 AF = 0 的碱基
+     */
+    public void setDeleteAF0(boolean deleteAF0) {
+        this.deleteAF0 = deleteAF0;
+    }
+
+    public boolean isKeepAll() {
+        return keepAll;
+    }
+
+    public boolean isCheckAf() {
+        return checkAf;
+    }
+
+    public double getIdentityAF() {
+        return identityAF;
+    }
+
+    public boolean isDeleteAF0() {
+        return deleteAF0;
+    }
+
+    /**
      * 获取管理器
      */
     public SmartList<GTBManager> getManagers() {
         return this.managers;
+    }
+
+    /**
+     * 获取管理器
+     */
+    public GTBManager getManager(int index) {
+        return this.managers.get(index);
     }
 
     /**
@@ -129,8 +194,14 @@ public class MergeTask extends IBuildTask {
                 Assert.that(manager.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot merge unordered GTBs, please use `rebuild` to sort them first");
             }
 
+            Assert.that(this.managers.size() >= 2, GBCExceptionOptions.GTBComponentException, "the number of input files is less than 2");
+
             // 构建核心任务
-            MergeKernel.submit(this);
+            if (this.checkAf) {
+                MergeMultiFileWithCheckAllele.submit(this);
+            } else {
+                MergeKernel.submit(this);
+            }
 
             // 清除缓存数据
             GTBRootCache.clear(this.outputFileName);

@@ -23,6 +23,12 @@ enum BuildFunction {
     private final CommandParser parser = BuildParser.getParser();
 
     public static int submit(String... args) throws IOException {
+        if (args.length == INSTANCE.parser.getOffset() + 1) {
+            // 参数长度和偏移量相等，此时打印 help 文档
+            System.out.println(INSTANCE.parser);
+            return 0;
+        }
+
         CommandMatcher options = parse(args);
 
         if (options.isPassedIn("-h")) {

@@ -281,6 +281,22 @@ public class Variant {
     }
 
     /**
+     * 横向合并位点 (空基因型)
+     */
+    public Variant merge(int missNum) {
+        Variant mergeVariant = new Variant();
+        mergeVariant.chromosome = this.chromosome;
+        mergeVariant.position = this.position;
+        mergeVariant.ploidy = this.ploidy;
+        mergeVariant.phased = this.phased;
+        mergeVariant.ALT = this.ALT;
+        mergeVariant.REF = this.REF;
+        mergeVariant.BEGs = new byte[missNum + this.BEGs.length];
+        System.arraycopy(this.BEGs, 0, mergeVariant.BEGs, 0, this.BEGs.length);
+        return mergeVariant;
+    }
+
+    /**
      * 横向合并位点 (认为它们来自不同的测序样本)
      * @param otherVariant 另一个变异位点
      * @param verifyCoordinate 是否验证坐标

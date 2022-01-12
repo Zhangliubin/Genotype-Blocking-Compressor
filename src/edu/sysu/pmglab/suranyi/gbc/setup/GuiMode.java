@@ -1,6 +1,7 @@
 package edu.sysu.pmglab.suranyi.gbc.setup;
 
 import com.formdev.flatlaf.FlatLightLaf;
+import edu.sysu.pmglab.suranyi.gbc.setup.command.EntryPoint;
 import edu.sysu.pmglab.suranyi.gbc.setup.windows.MainFrame;
 
 import javax.swing.*;
@@ -31,7 +32,7 @@ public class GuiMode {
             System.exit(402);
         } catch (HeadlessException e) {
             System.out.println("FATAL-401    No X11 DISPLAY variable was set, but this program performed an operation which requires it.");
-            System.exit(401);
+            System.out.println(EntryPoint.INSTANCE.parser);
         }
     }
 }

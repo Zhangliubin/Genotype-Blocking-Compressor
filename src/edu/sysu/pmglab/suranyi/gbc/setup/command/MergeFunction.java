@@ -23,6 +23,12 @@ enum MergeFunction {
     private final CommandParser parser = MergeParser.getParser();
 
     public static int submit(String... args) throws IOException {
+        if (args.length == INSTANCE.parser.getOffset() + 1) {
+            // 参数长度和偏移量相等，此时打印 help 文档
+            System.out.println(INSTANCE.parser);
+            return 0;
+        }
+
         CommandMatcher options = parse(args);
 
         if (options.isPassedIn("-h")) {
@@ -79,6 +85,13 @@ enum MergeFunction {
 
             if (options.isPassedIn("--max-allele")) {
                 task.setVariantQualityControlAllelesNum((int) options.get("--max-allele"));
+            }
+
+            if (options.isPassedIn("--check-af")) {
+                task.setCheckAf(true);
+                task.setIdentifyAF((double) options.get("--ide-af"));
+                task.setKeepAll(options.isPassedIn("--keep-all"));
+                task.setDeleteAF0(options.isPassedIn("--del-af0"));
             }
 
             // 输出日志

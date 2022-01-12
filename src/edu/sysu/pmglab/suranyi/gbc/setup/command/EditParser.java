@@ -155,7 +155,7 @@ enum EditParser {
                 .setFormat("'--concat <file> <file> ...'");
         parser.register("--reset-subject")
                 .arity(1)
-                .convertTo(new StringArrayConverter())
+                .convertTo(new StringArrayConverter(","))
                 .setOptionGroup("Options")
                 .setDescription("Reset subject names (request that same subject number and no duplicated names) for gtb file directly. Subject names can be stored in a file with ',' delimited form, and pass in via '--reset-subject @file'")
                 .setFormat("'--reset-subject <string>,<string>,...' or '--reset-subject @<file>'");

@@ -2,6 +2,7 @@ package edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader;
 
 import edu.sysu.pmglab.suranyi.check.Assert;
 import edu.sysu.pmglab.suranyi.check.exception.RuntimeExceptionOptions;
+import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
@@ -17,13 +18,12 @@ import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.Collection;
-import java.util.Iterator;
+import java.util.*;
 
 /**
- * @Data        :2021/08/14
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
+ * @Data :2021/08/14
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
  * @Description :GTB 读取器
  */
 
@@ -49,6 +49,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 加载重叠群文件
+     *
      * @param contig 重叠群文件
      */
     public void loadContig(String contig) throws IOException {
@@ -107,6 +108,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体
+     *
      * @param chromosomes 染色体编号
      */
     public void limit(String... chromosomes) {
@@ -122,7 +124,8 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体及范围
-     * @param chromosome 染色体编号
+     *
+     * @param chromosome     染色体编号
      * @param startNodeIndex 限定访问的节点起始范围
      */
     public void limit(String chromosome, int startNodeIndex) {
@@ -131,9 +134,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体及范围
-     * @param chromosome 染色体编号
+     *
+     * @param chromosome     染色体编号
      * @param startNodeIndex 限定访问的节点起始范围
-     * @param endNodeIndex 限定访问的节点终止范围
+     * @param endNodeIndex   限定访问的节点终止范围
      */
     public void limit(String chromosome, int startNodeIndex, int endNodeIndex) {
         Assert.that(manager.contain(chromosome), GBCExceptionOptions.GTBComponentException, "chromosome=" + chromosome + " not in current GTB file");
@@ -142,6 +146,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体
+     *
      * @param chromosomeIndexes 染色体编号
      */
     public void limit(int... chromosomeIndexes) {
@@ -151,8 +156,9 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体及范围
+     *
      * @param chromosomeIndex 染色体编号
-     * @param startNodeIndex 限定访问的节点起始范围
+     * @param startNodeIndex  限定访问的节点起始范围
      */
     public void limit(int chromosomeIndex, int startNodeIndex) {
         limit(chromosomeIndex, startNodeIndex, -1);
@@ -160,9 +166,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 限定访问的染色体及范围
+     *
      * @param chromosomeIndex 染色体编号
-     * @param startNodeIndex 限定访问的节点起始范围
-     * @param endNodeIndex 限定访问的节点终止范围
+     * @param startNodeIndex  限定访问的节点起始范围
+     * @param endNodeIndex    限定访问的节点终止范围
      */
     public void limit(int chromosomeIndex, int startNodeIndex, int endNodeIndex) {
         Assert.that(manager.contain(chromosomeIndex), GBCExceptionOptions.GTBComponentException, "chromosome=" + ChromosomeInfo.getString(chromosomeIndex) + " (index=" + chromosomeIndex + ") not in current GTB file");
@@ -228,6 +235,191 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
         }
     }
 
+    /**
+     * 读取下一个位点，带有位点位置约束
+     */
+    public Variant readVariant(Set<Integer> condition) throws IOException {
+        TaskVariant taskVariant;
+
+        do {
+            if (pointer.chromosomeIndex == -1) {
+                return null;
+            }
+
+            this.cache.fill(pointer, false);
+            taskVariant = this.cache.taskVariants[pointer.variantIndex];
+
+            if (condition.contains(taskVariant.position)) {
+                GTBNode node = pointer.getNode();
+                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                    this.cache.decompressGT(node, pointer, true);
+                }
+                byte[] BEGs = new byte[this.pairs.length];
+                fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                pointer.next();
+                return new Variant(node.chromosomeIndex, taskVariant.position, this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength), BEGs, this.phased);
+            } else {
+                pointer.next();
+            }
+        } while (true);
+    }
+
+    /**
+     * 读取下一个位点，带有位点位置约束
+     */
+    public Variant readVariant(Map<?, Set<Integer>> condition) throws IOException {
+        TaskVariant taskVariant;
+
+        do {
+            if (pointer.chromosomeIndex == -1) {
+                return null;
+            }
+
+            this.cache.fill(pointer, false);
+            taskVariant = this.cache.taskVariants[pointer.variantIndex];
+            GTBNode node = pointer.getNode();
+            boolean status = (condition.containsKey(node.chromosomeIndex) && condition.get(node.chromosomeIndex).contains(taskVariant.position));
+            if (!status) {
+                String chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                status = condition.containsKey(chromosome) && condition.get(chromosome).contains(taskVariant.position);
+            }
+
+            if (status) {
+                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                    this.cache.decompressGT(node, pointer, true);
+                }
+
+                byte[] BEGs = new byte[this.pairs.length];
+                fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                pointer.next();
+                return new Variant(node.chromosomeIndex, taskVariant.position, this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength), BEGs, this.phased);
+            } else {
+                pointer.next();
+            }
+        } while (true);
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     */
+    public Variant[] readVariants() throws IOException {
+        final Variant variant = readVariant();
+
+        if (variant != null) {
+            TaskVariant taskVariant;
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+
+            while (pointer.chromosomeIndex != -1) {
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    byte[] BEGs = new byte[this.pairs.length];
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    // 标记位置值
+                    variants.add(new Variant(node.chromosomeIndex, taskVariant.position, this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength), BEGs, this.phased));
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants.toArray(new Variant[]{});
+        } else {
+            // 不存在下一个位点，此时 返回 null
+            return null;
+        }
+    }
+
+    /**
+     * 读取下一个位点，带有位点位置约束 (公共坐标构成)
+     */
+    public Variant[] readVariants(Set<Integer> condition) throws IOException {
+        final Variant variant = readVariant(condition);
+
+        if (variant != null) {
+            TaskVariant taskVariant;
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+
+            while (pointer.chromosomeIndex != -1) {
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    byte[] BEGs = new byte[this.pairs.length];
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    // 标记位置值
+                    variants.add(new Variant(node.chromosomeIndex, taskVariant.position, this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength), BEGs, this.phased));
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants.toArray(new Variant[]{});
+        } else {
+            // 不存在下一个位点，此时 返回 null
+            return null;
+        }
+    }
+
+    /**
+     * 读取下一个位点，带有位点位置约束 (公共坐标构成)
+     */
+    public Variant[] readVariants(Map<?, Set<Integer>> condition) throws IOException {
+        final Variant variant = readVariant(condition);
+        if (variant != null) {
+            TaskVariant taskVariant;
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+
+            while (pointer.chromosomeIndex != -1) {
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    byte[] BEGs = new byte[this.pairs.length];
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    // 标记位置值
+                    variants.add(new Variant(node.chromosomeIndex, taskVariant.position, this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength), BEGs, this.phased));
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants.toArray(new Variant[]{});
+        } else {
+            // 不存在下一个位点，此时 返回 null
+            return null;
+        }
+    }
+
+    /**
+     * 读取下一个位点
+     */
     public boolean readVariant(Variant variant) throws IOException {
         if (pointer.chromosomeIndex != -1) {
             this.cache.fill(pointer, this.pairs.length > 0);
@@ -263,6 +455,311 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             variant.ALT = null;
             variant.phased = this.phased;
             return false;
+        }
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     */
+    public boolean readVariant(Variant variant, Set<Integer> condition) throws IOException {
+        TaskVariant taskVariant;
+        GTBNode node;
+        while (pointer.chromosomeIndex != -1) {
+            this.cache.fill(pointer, false);
+            taskVariant = this.cache.taskVariants[pointer.variantIndex];
+            node = pointer.getNode();
+
+            if (condition.contains(taskVariant.position)) {
+                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                    this.cache.decompressGT(node, pointer, true);
+                }
+
+                if (this.pairs.length != variant.BEGs.length) {
+                    variant.BEGs = new byte[this.pairs.length];
+                }
+
+                byte[] BEGs = variant.BEGs;
+
+                fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                variant.chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                variant.position = taskVariant.position;
+                variant.ploidy = ChromosomeInfo.getPloidy(node.chromosomeIndex);
+
+                int sepIndex = this.cache.allelesPosCache.indexOf(ByteCode.TAB, taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength);
+                variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
+                variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
+                variant.phased = this.phased;
+
+                pointer.next();
+                return true;
+            } else {
+                pointer.next();
+            }
+        }
+
+        // 不存在下一个位点，此时 返回 null
+        variant.chromosome = null;
+        variant.position = 0;
+        variant.ploidy = 0;
+
+        variant.REF = null;
+        variant.ALT = null;
+        variant.phased = this.phased;
+        return false;
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     */
+    public boolean readVariant(Variant variant, Map<?, Set<Integer>> condition) throws IOException {
+        TaskVariant taskVariant;
+        GTBNode node;
+        while (pointer.chromosomeIndex != -1) {
+            this.cache.fill(pointer, false);
+            taskVariant = this.cache.taskVariants[pointer.variantIndex];
+            node = pointer.getNode();
+            boolean status = (condition.containsKey(node.chromosomeIndex) && condition.get(node.chromosomeIndex).contains(taskVariant.position));
+            if (!status) {
+                String chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                status = condition.containsKey(chromosome) && condition.get(chromosome).contains(taskVariant.position);
+            }
+
+            if (status) {
+                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                    this.cache.decompressGT(node, pointer, true);
+                }
+
+                if (this.pairs.length != variant.BEGs.length) {
+                    variant.BEGs = new byte[this.pairs.length];
+                }
+
+                byte[] BEGs = variant.BEGs;
+
+                fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                variant.chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                variant.position = taskVariant.position;
+                variant.ploidy = ChromosomeInfo.getPloidy(node.chromosomeIndex);
+
+                int sepIndex = this.cache.allelesPosCache.indexOf(ByteCode.TAB, taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength);
+                variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
+                variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
+                variant.phased = this.phased;
+
+                pointer.next();
+                return true;
+            } else {
+                pointer.next();
+            }
+        }
+
+        // 不存在下一个位点，此时 返回 null
+        variant.chromosome = null;
+        variant.position = 0;
+        variant.ploidy = 0;
+
+        variant.REF = null;
+        variant.ALT = null;
+        variant.phased = this.phased;
+        return false;
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     * 从 variantCache 中获取位点，并将结果放入另一区域
+     */
+    public SmartList<Variant> readVariants(SmartList<Variant> variantCache) throws IOException {
+        Variant variant;
+        if (variantCache.size() == 0) {
+            variant = new Variant();
+        } else {
+            variant = variantCache.popFirst();
+        }
+
+        if (!readVariant(variant)) {
+            // 没有位点，返回长度为 0
+            variantCache.add(variant);
+            return null;
+        } else {
+            // 记录当前 位点
+            int position = variant.position;
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+
+            TaskVariant taskVariant;
+            while (pointer.chromosomeIndex != -1) {
+                if (variantCache.size() == 0) {
+                    variant = new Variant();
+                } else {
+                    variant = variantCache.popFirst();
+                }
+
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    if (this.pairs.length != variant.BEGs.length) {
+                        variant.BEGs = new byte[this.pairs.length];
+                    }
+
+                    byte[] BEGs = variant.BEGs;
+
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    variant.chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                    variant.position = taskVariant.position;
+                    variant.ploidy = ChromosomeInfo.getPloidy(node.chromosomeIndex);
+
+                    int sepIndex = this.cache.allelesPosCache.indexOf(ByteCode.TAB, taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
+                    variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.phased = this.phased;
+
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants;
+        }
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     * 从 variantCache 中获取位点，并将结果放入另一区域
+     */
+    public SmartList<Variant> readVariants(SmartList<Variant> variantCache, Set<Integer> condition) throws IOException {
+        Variant variant;
+        if (variantCache.size() == 0) {
+            variant = new Variant();
+        } else {
+            variant = variantCache.popFirst();
+        }
+
+        if (!readVariant(variant, condition)) {
+            // 没有位点，返回长度为 0
+            variantCache.add(variant);
+            return null;
+        } else {
+            // 记录当前 位点
+            int position = variant.position;
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+
+            TaskVariant taskVariant;
+            while (pointer.chromosomeIndex != -1) {
+                if (variantCache.size() == 0) {
+                    variant = new Variant();
+                } else {
+                    variant = variantCache.popFirst();
+                }
+
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    if (this.pairs.length != variant.BEGs.length) {
+                        variant.BEGs = new byte[this.pairs.length];
+                    }
+
+                    byte[] BEGs = variant.BEGs;
+
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    variant.chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                    variant.position = taskVariant.position;
+                    variant.ploidy = ChromosomeInfo.getPloidy(node.chromosomeIndex);
+
+                    int sepIndex = this.cache.allelesPosCache.indexOf(ByteCode.TAB, taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
+                    variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.phased = this.phased;
+
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants;
+        }
+    }
+
+    /**
+     * 读取下一个位点 (公共坐标构成)
+     * 从 variantCache 中获取位点，并将结果放入另一区域
+     */
+    public SmartList<Variant> readVariants(SmartList<Variant> variantCache, Map<?, Set<Integer>> condition) throws IOException {
+        Variant variant;
+        if (variantCache.size() == 0) {
+            variant = new Variant();
+        } else {
+            variant = variantCache.popFirst();
+        }
+
+        if (!readVariant(variant, condition)) {
+            // 没有位点，返回长度为 0
+            variantCache.add(variant);
+            return null;
+        } else {
+            // 记录当前 位点
+            int position = variant.position;
+            int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
+            SmartList<Variant> variants = new SmartList<>();
+            variants.add(variant);
+
+            TaskVariant taskVariant;
+            while (pointer.chromosomeIndex != -1) {
+                if (variantCache.size() == 0) {
+                    variant = new Variant();
+                } else {
+                    variant = variantCache.popFirst();
+                }
+
+                this.cache.fill(pointer, false);
+                taskVariant = this.cache.taskVariants[pointer.variantIndex];
+                GTBNode node = pointer.getNode();
+
+                if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
+                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
+                        this.cache.decompressGT(node, pointer, true);
+                    }
+
+                    if (this.pairs.length != variant.BEGs.length) {
+                        variant.BEGs = new byte[this.pairs.length];
+                    }
+
+                    byte[] BEGs = variant.BEGs;
+
+                    fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
+
+                    variant.chromosome = ChromosomeInfo.getString(node.chromosomeIndex);
+                    variant.position = taskVariant.position;
+                    variant.ploidy = ChromosomeInfo.getPloidy(node.chromosomeIndex);
+
+                    int sepIndex = this.cache.allelesPosCache.indexOf(ByteCode.TAB, taskVariant.alleleStart, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
+                    variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
+                    variant.phased = this.phased;
+
+                    pointer.next();
+                } else {
+                    break;
+                }
+            }
+            return variants;
         }
     }
 
@@ -308,6 +805,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 通过指针类进行跳转，请注意，该方法可能会破坏 limit 信息
+     *
      * @param pointer 指针管理类
      */
     public boolean seek(Pointer pointer) {
@@ -317,8 +815,9 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 设置指针
+     *
      * @param chromosome 染色体信息
-     * @param position 位置值
+     * @param position   位置值
      */
     public boolean seek(String chromosome, int position) throws IOException {
         return seek(ChromosomeInfo.getIndex(chromosome), position);
@@ -326,8 +825,9 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
 
     /**
      * 设置指针
+     *
      * @param originChromosomeIndex 染色体信息
-     * @param position 位置值
+     * @param position              位置值
      */
     public boolean seek(int originChromosomeIndex, int position) throws IOException {
         GTBNodes nodes = this.manager.getGTBNodes(originChromosomeIndex);

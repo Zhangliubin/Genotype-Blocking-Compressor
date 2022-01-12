@@ -5,6 +5,7 @@ import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.commandParser.converter.array.StringArrayConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalDoubleRangeConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalIntRangeConverter;
+import edu.sysu.pmglab.suranyi.commandParser.converter.value.DoubleConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.IntConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.PassedInConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.StringConverter;
@@ -67,6 +68,27 @@ enum MergeParser {
                 .convertTo(new StringArrayConverter())
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
                 .setOptionGroup("Options");
+        parser.register("--check-af")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Check Complementary Strand (dev)")
+                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G).");
+        parser.register("--ide-af")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(0.1d)
+                .setOptionGroup("Check Complementary Strand (dev)")
+                .setDescription("Correct allele of variants with the allele frequency gap (|af1 - af2|) < --ide-af. ");
+        parser.register("--keep-all")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Check Complementary Strand (dev)")
+                .setDescription("Only sites that with common coordinates are kept. Use '--keep-all' to keep all sites and the missing genotype is replaced by '.' instead.");
+        parser.register("--del-af0")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Check Complementary Strand (dev)")
+                .setDescription("Delete the allele with allele frequency=0.\n.");
         parser.register("--contig")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -154,6 +176,7 @@ enum MergeParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
+
         parser.register("--seq-ac")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())

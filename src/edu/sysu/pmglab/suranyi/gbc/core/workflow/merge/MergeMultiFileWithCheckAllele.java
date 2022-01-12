@@ -1,203 +1,327 @@
 package edu.sysu.pmglab.suranyi.gbc.core.workflow.merge;
 
+import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
-import edu.sysu.pmglab.suranyi.easytools.FileUtils;
-import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
-import edu.sysu.pmglab.suranyi.gbc.core.build.BuildTask;
-import edu.sysu.pmglab.suranyi.gbc.core.extract.ExtractTask;
-import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
+import edu.sysu.pmglab.suranyi.easytools.ByteCode;
+import edu.sysu.pmglab.suranyi.gbc.core.build.MergeTask;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.GTBReader;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriter;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriterBuilder;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.*;
 
 /**
  * @author suranyi
  * @description
  */
 
-class MergeMultiFileWithCheckAllele {
-    public static void main(String[] args) {
+public class MergeMultiFileWithCheckAllele {
+    MergeTask task;
+    static byte[] missAllele = new byte[]{ByteCode.PERIOD};
+    static HashMap<Byte, Byte> complementaryBase = new HashMap<>();
 
-        try {
-            // 解析输入的参数
-            Options.parse(args);
-
-            // 产生具有相交坐标的新文件
-            convertInputToGTB();
-
-            // 产生具有相交坐标的新文件
-            createMergeCoordinate();
-
-            // 校正等位基因
-            checkAllele();
-
-            // 输出文件
-            outputAsVCF();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    static {
+        byte A = 65;
+        byte T = 84;
+        byte C = 67;
+        byte G = 71;
+        complementaryBase.put(A, T);
+        complementaryBase.put(T, A);
+        complementaryBase.put(C, G);
+        complementaryBase.put(G, C);
     }
 
-    static void convertInputToGTB() throws IOException {
-        // 压缩输入的文件
-        for (int i = 0; i < Options.fileNums; i++) {
-            if (Options.inputFileNames[i].endsWith(".vcf") || Options.inputFileNames[i].endsWith(".gz")) {
-                String temp = FileUtils.fixExtension(Options.inputFileNames[i], ".gtb", ".vcf.gz", ".vcf", ".gz");
+    MergeMultiFileWithCheckAllele(MergeTask task) throws IOException {
+        this.task = task;
 
-                // 压缩 GTB 文件
-                BuildTask compressor = new BuildTask(Options.inputFileNames[i], temp);
-                compressor.setPhased(Options.phased);
-                compressor.submit();
+        // sort managers (large -> small)
+        this.task.getManagers().sort((o1, o2) -> -Integer.compare(o1.getSubjectNum(), o2.getSubjectNum()));
 
-                // 替换输入文件名
-                Options.inputFileNames[i] = temp;
-            }
-        }
+        // start
+        start();
     }
 
-    /**
-     * 剔除不重叠的坐标
-     */
-    static void createMergeCoordinate() throws IOException {
+    public static void submit(MergeTask task) throws IOException {
+        new MergeMultiFileWithCheckAllele(task);
+    }
+
+    void start() throws IOException {
         // 记录坐标，如果坐标太多，可以考虑分染色体读取 (使用 reader.limit 语句)
-        HashMap<String, HashSet<Integer>>[] positions = new HashMap[Options.fileNums];
-        for (int i = 0; i < Options.fileNums; i++) {
-            GTBReader reader = new GTBReader(Options.inputFileNames[i]);
+        HashMap<String, HashSet<Integer>>[] loadInPositions = new HashMap[this.task.getManagers().size()];
+
+        for (int i = 0; i < this.task.getManagers().size(); i++) {
+            GTBReader reader = new GTBReader(this.task.getManager(i));
 
             // 只检查坐标，因此不需要解压基因型
             reader.selectSubjects(new int[]{});
 
-            positions[i] = new HashMap<>();
+            loadInPositions[i] = new HashMap<>();
             for (Variant variant : reader) {
-                if (!positions[i].containsKey(variant.chromosome)) {
-                    positions[i].put(variant.chromosome, new HashSet<>());
+                if (!loadInPositions[i].containsKey(variant.chromosome)) {
+                    loadInPositions[i].put(variant.chromosome, new HashSet<>());
                 }
 
-                positions[i].get(variant.chromosome).add(variant.position);
+                loadInPositions[i].get(variant.chromosome).add(variant.position);
             }
             reader.close();
         }
 
         // 合并坐标
-        for (int chromosomeIndex = 0; chromosomeIndex < ChromosomeInfo.supportedChromosomeList().length; chromosomeIndex++) {
-            String chromosome = ChromosomeInfo.getString(chromosomeIndex);
-            for (int i = 1; i < Options.fileNums; i++) {
-                if (positions[i].get(chromosome) != null) {
-                    positions[0].get(chromosome).retainAll(positions[i].get(chromosome));
+        if (this.task.isKeepAll()) {
+            for (int i = 1; i < this.task.getManagers().size(); i++) {
+                for (String chromosome : loadInPositions[i - 1].keySet()) {
+                    if (!loadInPositions[i].containsKey(chromosome)) {
+                        loadInPositions[i].put(chromosome, new HashSet<>());
+                    }
+
+                    loadInPositions[i].get(chromosome).addAll(loadInPositions[i - 1].get(chromosome));
                 }
             }
-        }
-        HashMap<String, HashSet<Integer>> finalPositions = positions[0];
+        } else {
+            int lastIndex = this.task.getManagers().size() - 1;
+            for (int i = 0; i < lastIndex; i++) {
+                for (String chromosome : loadInPositions[i].keySet()) {
+                    if (!loadInPositions[lastIndex].containsKey(chromosome)) {
+                        loadInPositions[lastIndex].put(chromosome, new HashSet<>());
+                    }
 
-        // 根据合并坐标提取新文件
-        for (int i = 0; i < Options.fileNums; i++) {
-            GTBWriterBuilder builder = new GTBWriterBuilder(FileUtils.fixExtension(Options.inputFileNames[i], ".temp.gtb", ".gtb"));
-            builder.setSubject(GTBRootCache.get(Options.inputFileNames[i]).getSubjects());
-            builder.setPhased(Options.phased);
-            GTBWriter writer = builder.build();
-            GTBReader reader = new GTBReader(Options.inputFileNames[i]);
-
-            for (Variant variant : reader) {
-                if (finalPositions.containsKey(variant.chromosome) && finalPositions.get(variant.chromosome).contains(variant.position)) {
-                    writer.write(variant);
+                    loadInPositions[lastIndex].get(chromosome).addAll(loadInPositions[i].get(chromosome));
                 }
+                loadInPositions[i] = loadInPositions[lastIndex];
             }
-            writer.close();
-            reader.close();
-            Options.inputFileNames[i] = builder.getOutputFileName();
         }
-    }
 
-    static void checkAllele() throws Exception {
         // 校正等位基因
         int index = 0;
-        while (index + 1 < Options.fileNums) {
+        while (index + 1 < this.task.getManagers().size()) {
             GTBReader reader1;
             if (index == 0) {
-                reader1 = new GTBReader(Options.inputFileNames[index]);
+                reader1 = new GTBReader(this.task.getManager(0));
             } else {
-                reader1 = new GTBReader(Options.outputDir + "/merge.gtb");
+                reader1 = new GTBReader(this.task.getOutputFileName() + "." + (index - 1) + " .~$temp");
             }
 
-            GTBReader reader2 = new GTBReader(Options.inputFileNames[index + 1]);
-            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(Options.outputDir + "/merge.gtb.~$temp");
+            GTBReader reader2 = new GTBReader(this.task.getManager(index + 1));
+            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index) + " .~$temp");
             writerBuilder.setSubject(ArrayUtils.merge(reader1.getAllSubjects(), reader2.getAllSubjects()));
             writerBuilder.setReference(reader1.getManager().getReference());
             GTBWriter writer = writerBuilder.build();
 
-            // 读取 2 号文件的第一个位点
-            Variant variant2 = reader2.readVariant();
+            // 元信息
+            GTBManager manager1 = reader1.getManager();
+            GTBManager manager2 = reader2.getManager();
+            SmartList<Variant> variants1;
+            SmartList<Variant> variants1Cache = new SmartList<>();
+            SmartList<Variant> variants2;
+            SmartList<Variant> variants2Cache = new SmartList<>();
+            Variant mergeVariant = new Variant();
+            mergeVariant.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
 
-            // 校正等位基因
-            out:
-            for (Variant variant1 : reader1) {
-                int chromosome1 = ChromosomeInfo.getIndex(variant1.chromosome);
-                int chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
-
-                if (chromosome1 < chromosome2) {
-                    continue out;
-                } else {
-                    while (chromosome1 > chromosome2) {
-                        if (reader2.readVariant(variant2)) {
-                            chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
-                        } else {
-                            // 文件 2 已经结束了
-                            break out;
-                        }
-                    }
-
-                    // 判断 position 的值
-                    if (variant1.position < variant2.position) {
-                        continue out;
-                    } else {
-                        while (variant2.position < variant1.position) {
-                            if (reader2.readVariant(variant2)) {
-                                chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
-
-                                if (chromosome1 != chromosome2) {
-                                    continue out;
-                                }
-                            } else {
-                                // 文件 2 已经结束了
-                                break out;
-                            }
-                        }
-
-                        // position 一致，此时比对 allele 信息
-                        writer.write(mergeVariant(variant1, variant2));
-                    }
-                }
+            for (int i = 0; i < 8; i++) {
+                variants1Cache.add(new Variant());
+                variants2Cache.add(new Variant());
             }
 
-            reader1.close();
-            reader2.close();
-            writer.close();
-            FileUtils.rename(Options.outputDir + "/merge.gtb.~$temp", Options.outputDir + "/merge.gtb");
-            GTBRootCache.clear();
-            index++;
-        }
+            for (String chromosome : loadInPositions[index].keySet()) {
+                boolean condition1 = false;
+                boolean condition2 = false;
+                HashSet<Integer> position = loadInPositions[index].get(chromosome);
 
-        // 最后删除所有的临时 GTB 文件
-        for (int i = 0; i < Options.fileNums; i++) {
-            FileUtils.delete(Options.inputFileNames[i]);
+                if (manager1.contain(chromosome)) {
+                    reader1.limit(chromosome);
+                    reader1.seek(chromosome, 0);
+                    variants1 = reader1.readVariants(variants1Cache, position);
+                }
+
+                if (manager2.contain(chromosome)) {
+                    reader2.limit(chromosome);
+                    reader2.seek(chromosome, 0);
+
+                    // 读取位点
+                    //condition2 = loadFromReader(reader2, variants2, variants2Cache, position);
+                }
+//
+//                while (condition1 || condition2) {
+//                    if (condition1 && !condition2) {
+//                        // v1 有效位点, v2 无效位点
+//                        Arrays.fill(mergeVariant.BEGs, variant1.BEGs.length, mergeVariant.BEGs.length, (byte) 0);
+//                        do {
+//                            mergeVariant.chromosome = variant1.chromosome;
+//                            mergeVariant.position = variant1.position;
+//                            mergeVariant.ploidy = variant1.ploidy;
+//                            mergeVariant.phased = variant1.phased;
+//                            mergeVariant.ALT = variant1.ALT;
+//                            mergeVariant.REF = variant1.REF;
+//                            System.arraycopy(variant1.BEGs, 0, mergeVariant.BEGs, 0, variant1.BEGs.length);
+//                            writer.write(mergeVariant);
+//                        } while (reader1.readVariant(variant1, position));
+//                        condition1 = false;
+//                    } else if (!condition1 && condition2) {
+//                        // v2 有效位点, v1 无效位点
+//                        Arrays.fill(mergeVariant.BEGs, 0, variant1.BEGs.length, (byte) 0);
+//                        do {
+//                            for (Variant variant2 : variants2) {
+//                                mergeVariant.chromosome = variant2.chromosome;
+//                                mergeVariant.position = variant2.position;
+//                                mergeVariant.ploidy = variant2.ploidy;
+//                                mergeVariant.phased = variant2.phased;
+//                                mergeVariant.ALT = variant2.ALT;
+//                                mergeVariant.REF = variant2.REF;
+//                                System.arraycopy(variant2.BEGs, 0, mergeVariant.BEGs, variant1.BEGs.length, variant2.BEGs.length);
+//                                writer.write(mergeVariant);
+//                            }
+//                            variants2Cache.add(variants2);
+//                            variants2.clear();
+//                        } while (loadFromReader(reader2, variants2, variants2Cache, position));
+//                        condition2 = false;
+//                    } else if (condition1 && condition2) {
+//                        for (Variant variant2: variants2) {
+//                            if (variant1.position == variant2.position) {
+//                                // 合并位点
+//                                boolean v1IsNormalAllele = isNormalAllele(variant1.ALT) && isNormalAllele(variant1.REF);
+//                                boolean v2IsNormalAllele = isNormalAllele(variant2.ALT) && isNormalAllele(variant2.REF);
+//
+//                                if (v1IsNormalAllele && v2IsNormalAllele) {
+//                                    // 标准碱基类型，执行位点合并
+//                                    writer.write(mergeVariant(variant1, variant2, mergeVariant));
+//                                } else {
+//                                    // 包含奇奇怪怪的碱基类型，此时不合并位点
+//                                    if (!v1IsNormalAllele) {
+//                                        Arrays.fill(mergeVariant.BEGs, manager1.getSubjectNum(), mergeVariant.BEGs.length, (byte) 0);
+//                                        mergeVariant.chromosome = variant1.chromosome;
+//                                        mergeVariant.position = variant1.position;
+//                                        mergeVariant.ploidy = variant1.ploidy;
+//                                        mergeVariant.phased = variant1.phased;
+//                                        mergeVariant.ALT = variant1.ALT;
+//                                        mergeVariant.REF = variant1.REF;
+//                                        writer.write(mergeVariant);
+//                                        condition1 = reader1.readVariant(variant1, position);
+//                                    }
+//
+//                                    if (!v2IsNormalAllele) {
+//                                        Arrays.fill(mergeVariant.BEGs, 0, manager1.getSubjectNum(), (byte) 0);
+//                                        mergeVariant.chromosome = variant2.chromosome;
+//                                        mergeVariant.position = variant2.position;
+//                                        mergeVariant.ploidy = variant2.ploidy;
+//                                        mergeVariant.phased = variant2.phased;
+//                                        mergeVariant.ALT = variant2.ALT;
+//                                        mergeVariant.REF = variant2.REF;
+//                                        writer.write(mergeVariant);
+//                                        condition2 = reader2.readVariant(variant2, position);
+//                                    }
+//
+//                                    continue;
+//                                }
+//
+//                                condition2 = reader2.readVariant(variant2, position);
+//                                if (condition2 && variant2.position == variant1.position) {
+//                                    while (condition2 && variant2.position == variant1.position) {
+//                                        // 仍然相等，需要记录指针 (说明 reader2 中有多个相同坐标的位点)
+//                                        writer.write(mergeVariant(variant1, variant2, mergeVariant));
+//                                        condition2 = reader2.readVariant(variant2, position);
+//                                    }
+//
+//                                    reader2.seek(pointer2);
+//                                }
+//                                condition1 = reader1.readVariant(variant1, position);
+//                            } else if (variant1.position < variant2.position) {
+//                                // 写入位点 1
+//                                Arrays.fill(mergeVariant.BEGs, manager1.getSubjectNum(), mergeVariant.BEGs.length, (byte) 0);
+//                                mergeVariant.chromosome = variant1.chromosome;
+//                                mergeVariant.position = variant1.position;
+//                                mergeVariant.ploidy = variant1.ploidy;
+//                                mergeVariant.phased = variant1.phased;
+//                                mergeVariant.ALT = variant1.ALT;
+//                                mergeVariant.REF = variant1.REF;
+//                                writer.write(mergeVariant);
+//                                condition1 = reader1.readVariant(variant1, position);
+//                            } else {
+//                                // variant1.position > variant2.position
+//                                Arrays.fill(mergeVariant.BEGs, 0, manager1.getSubjectNum(), (byte) 0);
+//                                mergeVariant.chromosome = variant2.chromosome;
+//                                mergeVariant.position = variant2.position;
+//                                mergeVariant.ploidy = variant2.ploidy;
+//                                mergeVariant.phased = variant2.phased;
+//                                mergeVariant.ALT = variant2.ALT;
+//                                mergeVariant.REF = variant2.REF;
+//                                writer.write(mergeVariant);
+//                                condition2 = reader2.readVariant(variant2, position);
+//                            }
+//                        }
+//                    }
+//                }
+//
+//                index++;
+            }
+//            out:
+//            for (Variant variant1 : reader1) {
+//                int chromosome1 = ChromosomeInfo.getIndex(variant1.chromosome);
+//                int chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
+//
+//                if (chromosome1 < chromosome2) {
+//                    // 染色体编号不一致
+//                    if (loadInPositions[index].containsKey(variant1.chromosome)) {
+//                        if (loadInPositions[index].get(variant1.chromosome).contains(variant1.position)) {
+//                            writer.write(variant1.merge(variant2.BEGs.length));
+//                        }
+//                    }
+//
+//                    continue;
+//                } else {
+//                    while (chromosome1 > chromosome2) {
+//                        pointer2 = reader2.tell();
+//
+//                        if (reader2.readVariant(variant2)) {
+//                            chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
+//                        } else {
+//                            // 文件 2 已经结束了
+//                            break out;
+//                        }
+//                    }
+//
+//                    // 判断 position 的值
+//                    if (variant1.position < variant2.position) {
+//                        continue out;
+//                    } else {
+//                        while (variant2.position < variant1.position) {
+//                            if (reader2.readVariant(variant2)) {
+//                                chromosome2 = ChromosomeInfo.getIndex(variant2.chromosome);
+//
+//                                if (chromosome1 != chromosome2) {
+//                                    continue out;
+//                                }
+//                            } else {
+//                                // 文件 2 已经结束了
+//                                break out;
+//                            }
+//                        }
+//
+//                        // position 一致，此时比对 allele 信息
+//                        writer.write(mergeVariant(variant1, variant2));
+//                    }
+//                }
+//            }
+//
+//            reader1.close();
+//            reader2.close();
+//            writer.close();
+//            GTBRootCache.clear();
+//            index++;
         }
     }
 
-    static Variant mergeVariant(Variant variant1, Variant variant2) {
+    Variant mergeVariant(Variant variant1, Variant variant2, Variant target) {
         boolean variant1AltIsMiss = false;
         boolean variant2AltIsMiss = false;
 
-        if (Arrays.equals(variant1.ALT, Options.missAllele)) {
+        if (Arrays.equals(variant1.ALT, missAllele)) {
             variant1AltIsMiss = true;
         }
 
-        if (Arrays.equals(variant2.ALT, Options.missAllele)) {
+        if (Arrays.equals(variant2.ALT, missAllele)) {
             variant2AltIsMiss = true;
         }
 
@@ -239,24 +363,19 @@ class MergeMultiFileWithCheckAllele {
         return variant1.merge(variant2);
     }
 
-    static void outputAsVCF() throws IOException {
-        ExtractTask task = new ExtractTask(Options.outputDir + "/merge.gtb", Options.outputDir + "/merge.vcf.gz");
-        task.decompressAll();
+    boolean alleleFrequencyEqual(double af1, double af2) {
+        return (Math.abs(af1 - af2) <= this.task.getIdentityAF());
     }
 
-    static boolean alleleFrequencyEqual(double af1, double af2) {
-        return (Math.abs(af1 - af2) <= 0.1);
-    }
-
-    static boolean alleleEqual(byte[] allele1, byte[] allele2) {
+    boolean alleleEqual(byte[] allele1, byte[] allele2) {
         return Arrays.equals(allele1, allele2) || Arrays.equals(allele1, getInverseAllele(allele2));
     }
 
-    static byte[] getInverseAllele(byte[] allele) {
+    byte[] getInverseAllele(byte[] allele) {
         byte[] alleleInverse = new byte[allele.length];
         for (int i = 0; i < alleleInverse.length; i++) {
-            if (Options.complementaryBase.containsKey((int) allele[i])) {
-                int code = Options.complementaryBase.get((int) allele[i]);
+            if (complementaryBase.containsKey((int) allele[i])) {
+                int code = complementaryBase.get((int) allele[i]);
                 alleleInverse[i] = (byte) code;
             } else {
                 alleleInverse[i] = (byte) allele[i];
@@ -264,5 +383,30 @@ class MergeMultiFileWithCheckAllele {
         }
 
         return alleleInverse;
+    }
+
+    boolean isNormalAllele(byte[] allele) {
+        byte[] alleleInverse = new byte[allele.length];
+        for (int i = 0; i < alleleInverse.length; i++) {
+            if (!complementaryBase.containsKey(allele[i]) && allele[i] != ByteCode.COMMA && allele[i] != ByteCode.PERIOD) {
+                // 不为 . 和 ,
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static void main(String[] args) throws IOException {
+        GTBReader reader = new GTBReader("/Users/suranyi/Documents/project/GBC/GBC-1.1/example/1.gtb");
+        SmartList<Variant> variants = new SmartList<>();
+        SmartList<Variant> variantsCache = new SmartList<>();
+        Map<Integer, Set<Integer>>  sets = new HashMap<>();
+        sets.put(4, new HashSet<>());
+        sets.get(4).add(289676);
+        System.out.println(Arrays.toString(reader.readVariants()));
+        System.out.println(Arrays.toString(reader.readVariants()));
+        System.out.println(reader.readVariant());
+        // System.out.println(Arrays.toString(reader.readVariants(sets)));
     }
 }

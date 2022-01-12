@@ -117,7 +117,7 @@ enum LDParser {
                 .arity(1)
                 .convertTo((IConverter<ILDModel>) params -> {
                     Assert.that(params.length == 1);
-                    ElementValidator validator = new ElementValidator("geno", "--geno", "--geno-ld", "--geno-r2", "hap", "--hap", "--hap-ld", "--hap-r2");
+                    ElementValidator validator = new ElementValidator("geno", "--geno", "--geno-ld", "--geno-r2", "hap", "--hap", "--hap-ld", "--hap-r2").setAllowIndex(false);
                     validator.validate("--model", params);
 
                     String param = params[0].toUpperCase();
@@ -131,7 +131,7 @@ enum LDParser {
                     }
                 })
                 .setOptionGroup("LD Calculation Options")
-                .setDescription("Calculate pairwise the linkage disequilibrium (hap, --hap, --hap-ld, --hap-r2) or genotypic correlation (geno, --geno, --geno-ld, --geno-r2)")
+                .setDescription("Calculate pairwise the linkage disequilibrium (hap, --hap, --hap-ld, --hap-r2) or genotypic correlation (geno, --geno, --geno-ld, --geno-r2).")
                 .setFormat("'-m <string>'");
         parser.register("--window-bp", "-bp")
                 .arity(1)
@@ -163,20 +163,20 @@ enum LDParser {
                 .defaultTo(LDTask.DEFAULT_MAF)
                 .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
                 .setOptionGroup("LD Calculation Options")
-                .setDescription("Exclude variants with the minor allele frequency (MAF) per variant < --maf.")
+                .setDescription("Exclude variants with the minor allele frequency (MAF) per variant <maf.")
                 .setFormat("'--maf <float, 0~1>'");
         parser.register("--subject", "-s")
                 .arity(1)
                 .convertTo(new StringArrayConverter(","))
                 .setOptionGroup("Subset Selection Options")
-                .setDescription("Calculate the LD for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'")
+                .setDescription("Calculate the LD for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'.")
                 .setFormat("'-s <string>,<string>,...' or '-s @<file>'");
         parser.register("--range", "-r")
                 .arity(1)
                 .convertTo(params -> {
                     RangeWithIndexConverter converter = new RangeWithIndexConverter();
                     String[] range = converter.convert(params);
-                    return new int[]{ChromosomeInfo.getIndex(range[0]), range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? 0 : Integer.parseInt(range[2])};
+                    return new int[]{ChromosomeInfo.getIndex(range[0]), range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2])};
                 })
                 .setOptionGroup("Subset Selection Options")
                 .setDescription("Calculate the LD by specified position range.")

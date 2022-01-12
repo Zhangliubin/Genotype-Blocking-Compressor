@@ -1,7 +1,7 @@
 /**
- * @Data        :2021/08/15
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
+ * @Data :2021/08/15
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
  * @Description :
  */
 
@@ -27,6 +27,7 @@ class DecompressionCache {
     final FileStream fileStream;
     final IDecompressor decompressor;
     final TaskVariant[] taskVariants;
+    boolean isGTDecompress;
 
     public DecompressionCache(GTBManager manager) throws IOException {
         this.genotypesCache = new VolumeByteStream(manager.getMaxDecompressedMBEGsSize());
@@ -62,7 +63,7 @@ class DecompressionCache {
             int taskNums = node.numOfVariants();
             for (int i = 0; i < taskNums; i++) {
                 this.taskVariants[i].setPosition(allelesPosCache.cacheOf(i << 2), allelesPosCache.cacheOf(1 + (i << 2)),
-                        allelesPosCache.cacheOf(2 + (i << 2)), allelesPosCache.cacheOf(3 + (i << 2)))
+                                allelesPosCache.cacheOf(2 + (i << 2)), allelesPosCache.cacheOf(3 + (i << 2)))
                         .setIndex(i)
                         .setDecoderIndex(i < node.subBlockVariantNum[0] ? 0 : 1);
             }
@@ -91,13 +92,21 @@ class DecompressionCache {
             Arrays.sort(this.taskVariants, 0, taskNums, TaskVariant::compareVariant);
 
             /* 读取 genotype 数据并解压 */
-            if (decompressGT) {
-                undecompressedCache.reset();
-                genotypesCache.reset();
-                this.fileStream.seek(node.blockSeek);
-                this.fileStream.read(undecompressedCache, node.compressedGenotypesSize);
-                decompressor.decompress(undecompressedCache, genotypesCache);
-            }
+            decompressGT(node, pointer, decompressGT);
+        }
+    }
+
+    public void decompressGT(GTBNode node, Pointer pointer, boolean decompressGT) throws IOException {
+        /* 读取 genotype 数据并解压 */
+        if (decompressGT) {
+            undecompressedCache.reset();
+            genotypesCache.reset();
+            this.fileStream.seek(node.blockSeek);
+            this.fileStream.read(undecompressedCache, node.compressedGenotypesSize);
+            decompressor.decompress(undecompressedCache, genotypesCache);
+            isGTDecompress = true;
+        } else {
+            isGTDecompress = false;
         }
     }
 
