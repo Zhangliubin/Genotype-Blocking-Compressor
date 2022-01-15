@@ -1,35 +1,35 @@
 package edu.sysu.pmglab.suranyi.gbc.core.build;
 
 import edu.sysu.pmglab.suranyi.check.Assert;
+import edu.sysu.pmglab.suranyi.check.ioexception.IOExceptionOptions;
 import edu.sysu.pmglab.suranyi.compressor.ICompressor;
 import edu.sysu.pmglab.suranyi.container.SmartList;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GBCExceptionOptions;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
-import edu.sysu.pmglab.suranyi.gbc.core.workflow.merge.MergeMultiFileWithCheckAllele;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.Collection;
 
 /**
- * @Data        :2021/02/06
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
- * @Description :重新构建 GTB 文件，不允许绕过 RebuildTake 发起任务
+ * @Data :2021/02/06
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
+ * @Description :合并多个 GTB 文件，不允许绕过 MergeTask 发起任务
  */
 
 public class MergeTask extends IBuildTask {
-    private final SmartList<GTBManager> managers;
-    private boolean checkAf;
-    private double identityAF;
-    private boolean keepAll;
-    private boolean deleteAF0;
-
-    private boolean inplace = false;
+    final SmartList<GTBManager> managers;
+    AlleleChecker alleleChecker;
+    boolean keepAll;
 
     /**
      * 构造器
+     *
      * @param inputFileName 输入文件名，可以是单个文件或文件夹
      */
     public MergeTask(String inputFileName) {
@@ -38,6 +38,7 @@ public class MergeTask extends IBuildTask {
 
     /**
      * 构造器
+     *
      * @param inputFileNames 输入文件名，可以是单个文件或文件夹
      */
     public MergeTask(String[] inputFileNames) {
@@ -47,7 +48,8 @@ public class MergeTask extends IBuildTask {
 
     /**
      * 构造器
-     * @param inputFileName 输入文件名，单个文件
+     *
+     * @param inputFileName  输入文件名，单个文件
      * @param outputFileName 输出文件名，只能是单个文件名
      */
     public MergeTask(String inputFileName, String outputFileName) {
@@ -56,6 +58,7 @@ public class MergeTask extends IBuildTask {
 
     /**
      * 构造器
+     *
      * @param inputFileNames 输入文件名，长度不能等于 0，否则是无效的输入
      * @param outputFileName 输出文件名，只能是单个文件名
      */
@@ -65,6 +68,7 @@ public class MergeTask extends IBuildTask {
 
     /**
      * 构造器
+     *
      * @param inputFileNames 输入文件名，长度不能等于 0，否则是无效的输入
      * @param outputFileName 输出文件名，只能是单个文件名
      */
@@ -85,6 +89,7 @@ public class MergeTask extends IBuildTask {
 
     /**
      * 设置质控的位点等位基因最大个数
+     *
      * @param variantQualityControlAllelesNum 质控的等位基因最大个数
      */
     @Override
@@ -99,9 +104,34 @@ public class MergeTask extends IBuildTask {
     /**
      * 保留所有位点
      */
+    public MergeTask setSiteMergeType(String type) {
+        synchronized (this) {
+            if (type.equalsIgnoreCase("union")) {
+                // 取并集
+                this.keepAll = true;
+            } else if (type.equalsIgnoreCase("intersection")) {
+                this.keepAll = false;
+            } else {
+                throw new IllegalArgumentException("task.setSiteMergeType only supported union or intersection");
+            }
+        }
+        return this;
+    }
+
     public MergeTask setKeepAll(boolean keepAll) {
         synchronized (this) {
             this.keepAll = keepAll;
+        }
+
+        return this;
+    }
+
+    /**
+     * 检查 allele frequency 并进行校正
+     */
+    public MergeTask setAlleleChecker(AlleleChecker checker) {
+        synchronized (this) {
+            this.alleleChecker = checker;
         }
         return this;
     }
@@ -109,44 +139,43 @@ public class MergeTask extends IBuildTask {
     /**
      * 检查 allele frequency 并进行校正
      */
-    public MergeTask setCheckAf(boolean checkAf) {
+    public MergeTask setAlleleChecker(boolean checkAf) {
         synchronized (this) {
-            this.checkAf = checkAf;
+            if (checkAf) {
+                this.alleleChecker = new Chi2TestChecker();
+            } else {
+                this.alleleChecker = null;
+            }
         }
         return this;
     }
 
     /**
-     * 识别为潜在相同碱基的 allele freq gap 阈值
+     * 检查 allele frequency 并进行校正
      */
-    public MergeTask setIdentifyAF(double ideAf) {
+    public MergeTask setAlleleChecker(boolean checkAf, double alpha) {
         synchronized (this) {
-            this.identityAF = ideAf;
+            if (checkAf) {
+                this.alleleChecker = new Chi2TestChecker(alpha);
+            } else {
+                this.alleleChecker = null;
+            }
         }
         return this;
     }
 
     /**
-     * 删除 AF = 0 的碱基
+     * 获取等位基因检查器
      */
-    public void setDeleteAF0(boolean deleteAF0) {
-        this.deleteAF0 = deleteAF0;
+    public AlleleChecker getAlleleChecker() {
+        return alleleChecker;
     }
 
+    /**
+     * 是否保留所有的位点
+     */
     public boolean isKeepAll() {
         return keepAll;
-    }
-
-    public boolean isCheckAf() {
-        return checkAf;
-    }
-
-    public double getIdentityAF() {
-        return identityAF;
-    }
-
-    public boolean isDeleteAF0() {
-        return deleteAF0;
     }
 
     /**
@@ -164,13 +193,6 @@ public class MergeTask extends IBuildTask {
     }
 
     /**
-     * 是否替换文件
-     */
-    public boolean isInplace() {
-        return inplace;
-    }
-
-    /**
      * 运行，并发控制
      */
     @Override
@@ -180,28 +202,16 @@ public class MergeTask extends IBuildTask {
                 this.outputFileName = autoGenerateOutputFileName();
             }
 
-            // if inputFileName = outputFileName
-            this.inplace = false;
-            for (GTBManager manager : this.managers) {
-                if (manager.getFileName().equals(this.outputFileName)) {
-                    this.inplace = true;
-                    break;
-                }
-            }
-
             // 检查文件是否有序
             for (GTBManager manager : this.managers) {
+                Assert.that(!manager.getFileName().equals(this.outputFileName), IOExceptionOptions.FileOccupiedException, "output file cannot be the same as the input file (" + this.outputFileName + ")");
                 Assert.that(manager.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot merge unordered GTBs, please use `rebuild` to sort them first");
             }
 
             Assert.that(this.managers.size() >= 2, GBCExceptionOptions.GTBComponentException, "the number of input files is less than 2");
 
             // 构建核心任务
-            if (this.checkAf) {
-                MergeMultiFileWithCheckAllele.submit(this);
-            } else {
-                MergeKernel.submit(this);
-            }
+            MergeKernel.submit(this);
 
             // 清除缓存数据
             GTBRootCache.clear(this.outputFileName);
@@ -228,6 +238,8 @@ public class MergeTask extends IBuildTask {
                 "\n\treordering: " + this.reordering + (this.reordering ? " (" + this.windowSize + " - Accumulated Generating Sequence)" : "") +
                 "\n\tblockSize: " + this.blockSize + " (-bs " + this.blockSizeType + ")" +
                 "\n\tcompressionLevel: " + this.compressionLevel + " (" + ICompressor.getCompressorName(this.getCompressor()) + ")" +
+                "\n\tsite selection: " + (this.keepAll ? "union" : "intersection") +
+                "\n\tcheck allele: " + (this.alleleChecker == null ? "false" : this.alleleChecker) +
                 (this.variantQC.size() == 0 ? "" : "\n\tvariantQC: " + this.variantQC.toString()) +
                 (this.alleleQC.size() == 0 ? "" : "\n\talleleQC: " + this.alleleQC.toString()) +
                 "\n}";
@@ -235,6 +247,6 @@ public class MergeTask extends IBuildTask {
 
     @Override
     public String autoGenerateOutputFileName() {
-        return this.managers.get(0).getFileName();
+        return new File(this.managers.get(0).getFileName()).getParent() + "/merge.gtb";
     }
 }

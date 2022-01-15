@@ -1,5 +1,6 @@
 package edu.sysu.pmglab.suranyi.gbc.setup.command;
 
+import edu.sysu.pmglab.suranyi.check.Assert;
 import edu.sysu.pmglab.suranyi.commandParser.CommandMatcher;
 import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.commandParser.converter.array.StringArrayConverter;
@@ -18,6 +19,7 @@ import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.ITask;
 import edu.sysu.pmglab.suranyi.gbc.core.build.BlockSizeParameter;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleACController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleAFController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleANController;
@@ -26,6 +28,7 @@ import edu.sysu.pmglab.suranyi.gbc.core.common.switcher.ISwitcher;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
 import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.AT_MOST_ONE;
+import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.PRECONDITION;
 
 enum MergeParser {
     /**
@@ -50,7 +53,7 @@ enum MergeParser {
     MergeParser() {
         // global options
         parser = new CommandParser(false);
-        parser.setProgramName("merge <input(s)>");
+        parser.setProgramName("merge <inputs>");
         parser.offset(0);
         parser.debug(false);
         parser.usingAt(true);
@@ -68,27 +71,26 @@ enum MergeParser {
                 .convertTo(new StringArrayConverter())
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
                 .setOptionGroup("Options");
-        parser.register("--check-af")
+        parser.register("--check-allele")
                 .arity(0)
                 .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand (dev)")
-                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G).");
-        parser.register("--ide-af")
+                .setOptionGroup("Check Complementary Strand")
+                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+        parser.register("--p-value")
                 .arity(1)
                 .convertTo(new DoubleConverter())
-                .defaultTo(0.1d)
-                .setOptionGroup("Check Complementary Strand (dev)")
-                .setDescription("Correct allele of variants with the allele frequency gap (|af1 - af2|) < --ide-af. ");
-        parser.register("--keep-all")
-                .arity(0)
-                .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand (dev)")
-                .setDescription("Only sites that with common coordinates are kept. Use '--keep-all' to keep all sites and the missing genotype is replaced by '.' instead.");
-        parser.register("--del-af0")
-                .arity(0)
-                .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand (dev)")
-                .setDescription("Delete the allele with allele frequency=0.\n.");
+                .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Check Complementary Strand")
+                .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
+                .setFormat("--p-value <float, 0.000001~0.5>");
+        parser.register("--freq-gap")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Check Complementary Strand")
+                .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
+                .setFormat("--freq-gap <float, 0.000001~0.5>");
         parser.register("--contig")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -97,6 +99,20 @@ enum MergeParser {
                 .setOptionGroup("Compressor Options")
                 .setDescription("Specify the corresponding contig file.")
                 .setFormat("'--contig <file>'");
+        parser.register("--method", "-m")
+                .arity(1)
+                .convertTo(params -> {
+                    Assert.that(params.length == 1);
+
+                    ElementValidator validator = new ElementValidator("union", "intersection");
+                    validator.setAllowIndex(false);
+                    validator.validate("--method", params[0]);
+                    return params[0].toLowerCase();
+                })
+                .defaultTo("intersection")
+                .setOptionGroup("Compressor Options")
+                .setDescription("Method for handing coordinates in different files (union or intersection), the missing genotype is replaced by '.'.")
+                .setFormat("'-m [union/intersection]'");
         parser.register("--output", "-o")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -176,7 +192,6 @@ enum MergeParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
-
         parser.register("--seq-ac")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
@@ -213,5 +228,8 @@ enum MergeParser {
         parser.registerRule("--blockSizeType", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--compressor", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--level", "--readyParas", AT_MOST_ONE);
+        parser.registerRule("--check-allele", "--freq-gap", PRECONDITION);
+        parser.registerRule("--check-allele", "--p-value", PRECONDITION);
+        parser.registerRule("--p-value", "--freq-gap", AT_MOST_ONE);
     }
 }

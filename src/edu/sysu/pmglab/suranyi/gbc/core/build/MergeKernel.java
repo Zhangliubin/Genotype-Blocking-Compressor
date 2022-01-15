@@ -1,734 +1,914 @@
 package edu.sysu.pmglab.suranyi.gbc.core.build;
 
-import edu.sysu.pmglab.suranyi.compressor.ICompressor;
-import edu.sysu.pmglab.suranyi.compressor.IDecompressor;
-import edu.sysu.pmglab.suranyi.container.Pair;
-import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
-import edu.sysu.pmglab.suranyi.container.ShareCache;
+import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
-import edu.sysu.pmglab.suranyi.easytools.ValueUtils;
-import edu.sysu.pmglab.suranyi.gbc.coder.decoder.BEGDecoder;
-import edu.sysu.pmglab.suranyi.gbc.coder.encoder.BEGEncoder;
-import edu.sysu.pmglab.suranyi.gbc.coder.encoder.MBEGEncoder;
-import edu.sysu.pmglab.suranyi.gbc.coder.BEGTransfer;
+import edu.sysu.pmglab.suranyi.easytools.FileUtils;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
-import edu.sysu.pmglab.suranyi.gbc.core.common.block.VariantAbstract;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleQC;
-import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.*;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantQC;
-import edu.sysu.pmglab.suranyi.threadPool.Block;
-import edu.sysu.pmglab.suranyi.threadPool.DynamicPipeline;
-import edu.sysu.pmglab.suranyi.threadPool.ThreadPool;
-import edu.sysu.pmglab.suranyi.unifyIO.options.FileOptions;
-import edu.sysu.pmglab.suranyi.unifyIO.FileStream;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.GTBReader;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriter;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriterBuilder;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 
 /**
- * @Data        :2021/02/14
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
- * @Description :Merge 核心任务
+ * @author suranyi
+ * @description
  */
 
 class MergeKernel {
-    /**
-     * 一个 kernel 只能绑定一个任务
-     */
-    final MergeTask task;
-
-    /**
-     * 编码器
-     */
-    final BEGEncoder encoder;
-    final MBEGEncoder groupEncoder;
-
-    /**
-     * IO 数据管道
-     */
-    final DynamicPipeline<Boolean, Task> uncompressedPipLine;
-
-    /**
-     * 合并文件标记信息
-     */
-    final int[] indexOffsets;
-    final int[] indexLengths;
-    final int[] phasedTransfers;
-    final int validSubjectNum;
-    final int blockSize;
-    final int maxOriginMBEGsSize;
-
-    /**
-     * 根数据管理器
-     */
-    final FileBaseInfoManager baseInfoManager;
-    final ArrayList<GTBNode> GTBNodeCache = new ArrayList<>(1024);
-    int maxEstimateSize = 0;
-
-    /**
-     * 输出数据文件
-     */
-    final FileStream outputFile;
-    final GTBManager[] managers;
-
-    /**
-     * 位点控制器、等位基因水平过滤器
-     */
     final VariantQC variantQC;
     final AlleleQC alleleQC;
+    final MergeTask task;
+    final AlleleChecker alleleChecker;
+    final HashSet<String>[] loadInChromosomes;
 
-    boolean status;
+    static byte[] missAllele = new byte[]{ByteCode.PERIOD};
+    static HashMap<Byte, Byte> complementaryBase = new HashMap<>();
 
-    /**
-     * 对外的提交方法，将任务提交至本类，进行压缩任务
-     */
-    static void submit(MergeTask task) throws IOException {
+    static {
+        byte A = 65;
+        byte T = 84;
+        byte C = 67;
+        byte G = 71;
+        complementaryBase.put(A, T);
+        complementaryBase.put(T, A);
+        complementaryBase.put(C, G);
+        complementaryBase.put(G, C);
+    }
+
+    MergeKernel(MergeTask task) throws IOException {
+        this.task = task;
+        this.alleleChecker = this.task.getAlleleChecker();
+
+        // sort managers (large -> small)
+        if (this.alleleChecker != null) {
+            // 在检查 allele frequency 的情况下需要进行排序
+            this.task.getManagers().sort((o1, o2) -> -Integer.compare(o1.getSubjectNum(), o2.getSubjectNum()));
+        } else {
+            // 其余情况
+            if (this.task.getManagers().size() > 2) {
+                // 一次性输入多个文件时，样本最少的位点具有最高的优先级（减少重复压缩次数）
+                this.task.getManagers().sort(Comparator.comparingInt(GTBManager::getSubjectNum));
+            }
+        }
+
+        // 记录坐标
+        this.loadInChromosomes = recordChromosome();
+
+        // 获取位点 QC
+        this.variantQC = this.task.getVariantQC();
+        this.alleleQC = this.task.getAlleleQC();
+
+        // 开始工作
+        if (this.alleleChecker == null) {
+            startWithoutAlleleCheck();
+        } else {
+            startWithAlleleCheck();
+        }
+    }
+
+    public static void submit(MergeTask task) throws IOException {
         new MergeKernel(task);
     }
 
-    GTBSubjectManager initSubjectManager(GTBManager[] managers) {
-        // 加载全部的样本，并构建双向索引表
-        VolumeByteStream vbs = new VolumeByteStream(2 << 20);
-        vbs.writeSafety(managers[0].getSubjects());
-        for (int i = 1; i < managers.length; i++) {
-            vbs.writeSafety(ByteCode.TAB);
-            vbs.writeSafety(managers[i].getSubjects());
+    HashSet<String>[] recordChromosome() {
+        // 记录坐标，如果坐标太多，可以考虑分染色体读取 (使用 reader.limit 语句)
+        HashSet<String>[] loadInChromosomes = new HashSet[this.task.getManagers().size()];
+
+        for (int i = 0; i < this.task.getManagers().size(); i++) {
+            loadInChromosomes[i] = new HashSet<>();
+            for (int chromosome : this.task.getManager(i).getChromosomeList()) {
+                loadInChromosomes[i].add(ChromosomeInfo.getString(chromosome));
+            }
         }
 
-        return new GTBSubjectManager(vbs);
-    }
-
-    int[] initIndexLength(GTBManager[] managers) {
-        // 传入所有的管理器
-        int[] lengths = new int[managers.length];
-        for (int i = 0; i < managers.length; i++) {
-            lengths[i] = managers[i].getSubjectNum();
+        if (this.task.isKeepAll()) {
+            // 合并所有坐标
+            for (int i = 1; i < this.task.getManagers().size(); i++) {
+                loadInChromosomes[i].addAll(loadInChromosomes[i - 1]);
+            }
+        } else {
+            // 取交集 (先对所有文件都取交集)
+            int lastIndex = this.task.getManagers().size() - 1;
+            for (int i = 0; i < lastIndex; i++) {
+                // 先在染色体水平取交集
+                loadInChromosomes[lastIndex].retainAll(loadInChromosomes[i]);
+                loadInChromosomes[i] = loadInChromosomes[lastIndex];
+            }
         }
 
-        return lengths;
+        return loadInChromosomes;
     }
 
-    int[] initIndexOffsets(int[] lengths) {
-        // 传入所有的管理器
-        int[] offsets = new int[lengths.length];
-        offsets[0] = 0;
-        for (int i = 1; i < offsets.length; i++) {
-            offsets[i] = offsets[i - 1] + lengths[i - 1];
+    HashSet<Integer> recordPosition(GTBReader reader1, GTBReader reader2, String chromosome) throws IOException {
+        if (this.task.isKeepAll()) {
+            return null;
+        } else {
+            HashSet<Integer> loadInPosition1 = new HashSet<>();
+
+            reader1 = new GTBReader(reader1.getManager(), this.task.isPhased(), false);
+            reader1.limit(chromosome);
+            reader1.seek(chromosome, 0);
+
+            // 先加载第一个文件全部的位点
+            for (Variant variant : reader1) {
+                loadInPosition1.add(variant.position);
+            }
+
+            reader1.close();
+
+            // 再移除第二个文件中没有的位点
+            reader2 = new GTBReader(reader2.getManager(), this.task.isPhased(), false);
+            reader2.limit(chromosome);
+            reader2.seek(chromosome, 0);
+
+            HashSet<Integer> loadInPosition2 = new HashSet<>();
+            for (Variant variant : reader2) {
+                if (loadInPosition1.contains(variant.position)) {
+                    loadInPosition2.add(variant.position);
+                }
+            }
+
+            reader2.close();
+            if (loadInPosition1.size() == loadInPosition2.size()) {
+                // 取了交集后元素数量一致，则转为不做约束
+                loadInPosition2.clear();
+                loadInPosition2 = null;
+            }
+
+            loadInPosition1.clear();
+            loadInPosition1 = null;
+
+            return loadInPosition2;
+        }
+    }
+
+    void startWithAlleleCheck() throws IOException {
+        // 校正等位基因
+        int index = 0;
+        while (index + 1 < this.task.getManagers().size()) {
+            GTBReader reader1;
+            if (index == 0) {
+                reader1 = new GTBReader(this.task.getManager(0), this.task.isPhased());
+            } else {
+                reader1 = new GTBReader(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp", this.task.isPhased());
+            }
+
+            GTBReader reader2 = new GTBReader(this.task.getManager(index + 1), this.task.isPhased());
+            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index) + ".~$temp");
+            writerBuilder.setPhased(this.task.isPhased());
+            writerBuilder.setSubject(ArrayUtils.merge(reader1.getAllSubjects(), reader2.getAllSubjects()));
+            writerBuilder.setReference(reader1.getManager().getReference());
+            // 最后一个文件之前都使用快速压缩模式
+            if (index + 2 == this.task.getManagers().size()) {
+                writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
+                writerBuilder.setReordering(this.task.isReordering());
+                writerBuilder.setWindowSize(this.task.getWindowSize());
+            } else {
+                writerBuilder.setCompressor(0, 3);
+                writerBuilder.setReordering(false);
+            }
+            writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
+            writerBuilder.setThreads(this.task.getThreads());
+            GTBWriter writer = writerBuilder.build();
+
+            // 元信息
+            GTBManager manager1 = reader1.getManager();
+            GTBManager manager2 = reader2.getManager();
+            SmartList<Variant> variants1 = null;
+            SmartList<Variant> variants1Cache = new SmartList<>();
+            SmartList<Variant> variants2 = null;
+            SmartList<Variant> variants2Cache = new SmartList<>();
+            Variant mergeVariant = new Variant();
+            Variant mergeVariant1 = new Variant();
+            Variant mergeVariant2 = new Variant();
+            mergeVariant.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+            mergeVariant1.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+            mergeVariant2.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+
+            for (int i = 0; i < 1; i++) {
+                variants1Cache.add(new Variant());
+                variants2Cache.add(new Variant());
+            }
+
+            for (String chromosome : loadInChromosomes[index + 1]) {
+                boolean condition1 = false;
+                boolean condition2 = false;
+                HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
+
+                if (manager1.contain(chromosome)) {
+                    reader1.limit(chromosome);
+                    reader1.seek(chromosome, 0);
+                    variants1 = reader1.readVariants(variants1Cache, position);
+                    condition1 = variants1 != null;
+                }
+
+                if (manager2.contain(chromosome)) {
+                    reader2.limit(chromosome);
+                    reader2.seek(chromosome, 0);
+                    variants2 = reader2.readVariants(variants2Cache, position);
+                    condition2 = variants2 != null;
+                }
+
+                while (condition1 || condition2) {
+                    if (condition1 && !condition2) {
+                        // v1 有效位点, v2 无效位点
+                        do {
+                            for (Variant variant1 : variants1) {
+                                mergeVariant1.chromosome = variant1.chromosome;
+                                mergeVariant1.position = variant1.position;
+                                mergeVariant1.ploidy = variant1.ploidy;
+                                mergeVariant1.phased = variant1.phased;
+                                mergeVariant1.ALT = variant1.ALT;
+                                mergeVariant1.REF = variant1.REF;
+                                System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                writeToFile(mergeVariant1, writer);
+                            }
+                            variants1Cache.add(variants1);
+                            variants1.clear();
+                            variants1 = reader1.readVariants(variants1Cache, position);
+                            condition1 = variants1 != null;
+                        } while (condition1);
+                    } else if (!condition1) {
+                        // v2 有效位点, v1 无效位点
+                        do {
+                            for (Variant variant2 : variants2) {
+                                mergeVariant2.chromosome = variant2.chromosome;
+                                mergeVariant2.position = variant2.position;
+                                mergeVariant2.ploidy = variant2.ploidy;
+                                mergeVariant2.phased = variant2.phased;
+                                mergeVariant2.ALT = variant2.ALT;
+                                mergeVariant2.REF = variant2.REF;
+                                System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                writeToFile(mergeVariant2, writer);
+                            }
+                            variants2Cache.add(variants2);
+                            variants2.clear();
+                            variants2 = reader2.readVariants(variants2Cache, position);
+                            condition2 = variants2 != null;
+                        } while (condition2);
+                    } else {
+                        // 都有有效位点, 此时先进行位置大小的比较
+                        int position1 = variants1.get(0).position;
+                        int position2 = variants2.get(0).position;
+                        int compareStatue = position1 - position2;
+                        if (compareStatue < 0) {
+                            // 写入所有的 1 位点，并移动 1 的指针
+                            do {
+                                for (Variant variant1 : variants1) {
+                                    mergeVariant1.chromosome = variant1.chromosome;
+                                    mergeVariant1.position = variant1.position;
+                                    mergeVariant1.ploidy = variant1.ploidy;
+                                    mergeVariant1.phased = variant1.phased;
+                                    mergeVariant1.ALT = variant1.ALT;
+                                    mergeVariant1.REF = variant1.REF;
+                                    System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                    writeToFile(mergeVariant1, writer);
+                                }
+                                variants1Cache.add(variants1);
+                                variants1.clear();
+                                variants1 = reader1.readVariants(variants1Cache, position);
+                                condition1 = variants1 != null;
+                                position1 = condition1 ? variants1.get(0).position : -1;
+                            } while (condition1 && position1 < position2);
+                        } else if (compareStatue > 0) {
+                            // 写入所有的 2 位点，并移动 2 的指针
+                            do {
+                                for (Variant variant2 : variants2) {
+                                    mergeVariant2.chromosome = variant2.chromosome;
+                                    mergeVariant2.position = variant2.position;
+                                    mergeVariant2.ploidy = variant2.ploidy;
+                                    mergeVariant2.phased = variant2.phased;
+                                    mergeVariant2.ALT = variant2.ALT;
+                                    mergeVariant2.REF = variant2.REF;
+                                    System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                    writeToFile(mergeVariant2, writer);
+                                }
+                                variants2Cache.add(variants2);
+                                variants2.clear();
+                                variants2 = reader2.readVariants(variants2Cache, position);
+                                condition2 = variants2 != null;
+                                position2 = condition2 ? variants2.get(0).position : -1;
+                            } while (condition2 && position1 > position2);
+                        } else {
+                            // 位点位置值一样
+                            int sizeVariants1 = variants1.size();
+                            int sizeVariants2 = variants2.size();
+                            // 检查 allele 时
+                            if (sizeVariants1 == sizeVariants2 && sizeVariants1 == 1) {
+                                // 只有一个位点，直接合并
+                                Variant variant1 = variants1.get(0);
+                                Variant variant2 = variants2.get(0);
+                                if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
+                                    writer.write(mergeVariant);
+                                }
+                            } else {
+                                // 多对多 (先找一致项，不一致的再进行匹配)
+                                SmartList<Variant> variants1new = new SmartList<>();
+
+                                out:
+                                for (int i = 0; i < variants1.size(); i++) {
+                                    Variant variant1 = variants1.get(i);
+                                    for (int j = 0; j < variants2.size(); j++) {
+                                        Variant variant2 = variants2.get(j);
+                                        if ((Arrays.equals(variant1.REF, variant2.REF) && Arrays.equals(variant1.ALT, variant2.ALT)) ||
+                                                (Arrays.equals(variant1.REF, variant2.ALT) && Arrays.equals(variant1.ALT, variant2.REF))) {
+                                            // 基本逻辑: 完全一致的碱基序列的位点直接合并，并且只合并一次
+                                            if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
+                                                writer.write(mergeVariant);
+                                            }
+                                            variants2.remove(variant2);
+                                            variants2Cache.add(variant2);
+                                            continue out;
+                                        }
+                                    }
+
+                                    // 没有遇到匹配的，此时记录下该位点
+                                    variants1new.add(variant1);
+                                }
+
+                                while (true) {
+                                    if (variants1new.size() == 0 && variants2.size() == 0) {
+                                        // 所有来自文件 1 和 文件 2 的位点都被匹配完成
+                                        break;
+                                    } else if (variants1new.size() == 0) {
+                                        // 所有来自文件 1 的位点都被匹配完成，此时文件 2 直接写入
+                                        for (Variant variant2 : variants2) {
+                                            mergeVariant2.chromosome = variant2.chromosome;
+                                            mergeVariant2.position = variant2.position;
+                                            mergeVariant2.ploidy = variant2.ploidy;
+                                            mergeVariant2.phased = variant2.phased;
+                                            mergeVariant2.ALT = variant2.ALT;
+                                            mergeVariant2.REF = variant2.REF;
+                                            System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                            writeToFile(mergeVariant2, writer);
+                                        }
+
+                                        break;
+                                    } else if (variants2.size() == 0) {
+                                        // 所有来自文件 2 的位点都被匹配完成，此时文件 1 直接写入
+                                        for (Variant variant1 : variants1new) {
+                                            mergeVariant1.chromosome = variant1.chromosome;
+                                            mergeVariant1.position = variant1.position;
+                                            mergeVariant1.ploidy = variant1.ploidy;
+                                            mergeVariant1.phased = variant1.phased;
+                                            mergeVariant1.ALT = variant1.ALT;
+                                            mergeVariant1.REF = variant1.REF;
+                                            System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                            writeToFile(mergeVariant1, writer);
+                                        }
+
+                                        break;
+                                    } else {
+                                        // 文件 1 和文件 2 都有位点，此时按照顺序匹配
+                                        SmartList<Variant> variants1NewTemp = new SmartList<>();
+                                        for (int i = 0; i < variants1new.size(); i++) {
+                                            Variant variant1 = variants1new.get(i);
+                                            if (variants2.size() > 0) {
+                                                Variant variant2 = variants2.popFirst();
+                                                if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
+                                                    writer.write(mergeVariant);
+                                                }
+                                                variants2Cache.add(variant2);
+                                                continue;
+                                            }
+
+                                            // 没有遇到匹配的，此时记录下该位点
+                                            variants1NewTemp.add(variant1);
+                                        }
+                                        variants1new = variants1NewTemp;
+                                    }
+                                }
+                            }
+
+                            variants1Cache.add(variants1);
+                            variants1.clear();
+                            variants1 = reader1.readVariants(variants1Cache, position);
+                            condition1 = variants1 != null;
+                            variants2Cache.add(variants2);
+                            variants2.clear();
+                            variants2 = reader2.readVariants(variants2Cache, position);
+                            condition2 = variants2 != null;
+                        }
+                    }
+                }
+
+                if (position != null) {
+                    position.clear();
+                }
+            }
+
+            reader1.close();
+            reader2.close();
+            writer.close();
+
+            // 删除上一个临时文件
+            if (index > 0) {
+                FileUtils.delete(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp");
+            }
+            index++;
         }
 
-        return offsets;
+        // 最后把文件名改为最终文件名
+        FileUtils.rename(this.task.getOutputFileName() + "." + (this.task.getManagers().size() - 2) + ".~$temp", this.task.getOutputFileName());
     }
 
-    int[] initPhasedTransfer(boolean targetPhased, GTBManager[] managers) {
-        // 传入所有的管理器
-        if (targetPhased) {
+    void startWithoutAlleleCheck() throws IOException {
+        int index = 0;
+        while (index + 1 < this.task.getManagers().size()) {
+            GTBReader reader1;
+            if (index == 0) {
+                reader1 = new GTBReader(this.task.getManager(0), this.task.isPhased());
+            } else {
+                reader1 = new GTBReader(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp", this.task.isPhased());
+            }
+
+            GTBReader reader2 = new GTBReader(this.task.getManager(index + 1), this.task.isPhased());
+            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index) + ".~$temp");
+            writerBuilder.setPhased(this.task.isPhased());
+            writerBuilder.setSubject(ArrayUtils.merge(reader1.getAllSubjects(), reader2.getAllSubjects()));
+            writerBuilder.setReference(reader1.getManager().getReference());
+            // 最后一个文件之前都使用快速压缩模式
+            if (index + 2 == this.task.getManagers().size()) {
+                writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
+                writerBuilder.setReordering(this.task.isReordering());
+                writerBuilder.setWindowSize(this.task.getWindowSize());
+            } else {
+                writerBuilder.setCompressor(0, 3);
+                writerBuilder.setReordering(false);
+            }
+            writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
+            writerBuilder.setThreads(this.task.getThreads());
+            GTBWriter writer = writerBuilder.build();
+
+            // 元信息
+            GTBManager manager1 = reader1.getManager();
+            GTBManager manager2 = reader2.getManager();
+            SmartList<Variant> variants1 = null;
+            SmartList<Variant> variants1Cache = new SmartList<>();
+            SmartList<Variant> variants2 = null;
+            SmartList<Variant> variants2Cache = new SmartList<>();
+            Variant mergeVariant = new Variant();
+            Variant mergeVariant1 = new Variant();
+            Variant mergeVariant2 = new Variant();
+            mergeVariant.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+            mergeVariant1.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+            mergeVariant2.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
+
+            for (int i = 0; i < 1; i++) {
+                variants1Cache.add(new Variant());
+                variants2Cache.add(new Variant());
+            }
+
+            for (String chromosome : loadInChromosomes[index + 1]) {
+                boolean condition1 = false;
+                boolean condition2 = false;
+                HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
+
+                if (manager1.contain(chromosome)) {
+                    reader1.limit(chromosome);
+                    reader1.seek(chromosome, 0);
+                    variants1 = reader1.readVariants(variants1Cache, position);
+                    condition1 = variants1 != null;
+                }
+
+                if (manager2.contain(chromosome)) {
+                    reader2.limit(chromosome);
+                    reader2.seek(chromosome, 0);
+                    variants2 = reader2.readVariants(variants2Cache, position);
+                    condition2 = variants2 != null;
+                }
+
+                while (condition1 || condition2) {
+                    if (condition1 && !condition2) {
+                        // v1 有效位点, v2 无效位点
+                        do {
+                            for (Variant variant1 : variants1) {
+                                mergeVariant1.chromosome = variant1.chromosome;
+                                mergeVariant1.position = variant1.position;
+                                mergeVariant1.ploidy = variant1.ploidy;
+                                mergeVariant1.phased = variant1.phased;
+                                mergeVariant1.ALT = variant1.ALT;
+                                mergeVariant1.REF = variant1.REF;
+                                System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                writeToFile(mergeVariant1, writer);
+                            }
+                            variants1Cache.add(variants1);
+                            variants1.clear();
+                            variants1 = reader1.readVariants(variants1Cache, position);
+                            condition1 = variants1 != null;
+                        } while (condition1);
+                    } else if (!condition1) {
+                        // v2 有效位点, v1 无效位点
+                        do {
+                            for (Variant variant2 : variants2) {
+                                mergeVariant2.chromosome = variant2.chromosome;
+                                mergeVariant2.position = variant2.position;
+                                mergeVariant2.ploidy = variant2.ploidy;
+                                mergeVariant2.phased = variant2.phased;
+                                mergeVariant2.ALT = variant2.ALT;
+                                mergeVariant2.REF = variant2.REF;
+                                System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                writeToFile(mergeVariant2, writer);
+                            }
+                            variants2Cache.add(variants2);
+                            variants2.clear();
+                            variants2 = reader2.readVariants(variants2Cache, position);
+                            condition2 = variants2 != null;
+                        } while (condition2);
+                    } else {
+                        // 都有有效位点, 此时先进行位置大小的比较
+                        int position1 = variants1.get(0).position;
+                        int position2 = variants2.get(0).position;
+                        int compareStatue = position1 - position2;
+                        if (compareStatue < 0) {
+                            // 写入所有的 1 位点，并移动 1 的指针
+                            do {
+                                for (Variant variant1 : variants1) {
+                                    mergeVariant1.chromosome = variant1.chromosome;
+                                    mergeVariant1.position = variant1.position;
+                                    mergeVariant1.ploidy = variant1.ploidy;
+                                    mergeVariant1.phased = variant1.phased;
+                                    mergeVariant1.ALT = variant1.ALT;
+                                    mergeVariant1.REF = variant1.REF;
+                                    System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                    writeToFile(mergeVariant1, writer);
+                                }
+                                variants1Cache.add(variants1);
+                                variants1.clear();
+                                variants1 = reader1.readVariants(variants1Cache, position);
+                                condition1 = variants1 != null;
+                                position1 = variants1 != null ? variants1.get(0).position : -1;
+                            } while (condition1 && position1 < position2);
+
+                        } else if (compareStatue > 0) {
+                            // 写入所有的 2 位点，并移动 2 的指针
+                            do {
+                                for (Variant variant2 : variants2) {
+                                    mergeVariant2.chromosome = variant2.chromosome;
+                                    mergeVariant2.position = variant2.position;
+                                    mergeVariant2.ploidy = variant2.ploidy;
+                                    mergeVariant2.phased = variant2.phased;
+                                    mergeVariant2.ALT = variant2.ALT;
+                                    mergeVariant2.REF = variant2.REF;
+                                    System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                    writeToFile(mergeVariant2, writer);
+                                }
+                                variants2Cache.add(variants2);
+                                variants2.clear();
+                                variants2 = reader2.readVariants(variants2Cache, position);
+                                condition2 = variants2 != null;
+                                position2 = variants2 != null ? variants2.get(0).position : -1;
+                            } while (condition2 && position1 > position2);
+                        } else {
+                            int sizeVariants1 = variants1.size();
+                            int sizeVariants2 = variants2.size();
+
+                            // 不检查 allele 时, 逐一配对
+                            if (sizeVariants1 == sizeVariants2 && sizeVariants1 == 1) {
+                                // 只有一个位点，直接合并
+                                writeToFile(variants1.get(0).merge(variants2.get(0), mergeVariant), writer);
+                            } else {
+                                // 多对多 (先找一致项，不一致的再进行匹配)
+                                SmartList<Variant> variants1new = new SmartList<>();
+
+                                out:
+                                for (int i = 0; i < variants1.size(); i++) {
+                                    Variant variant1 = variants1.get(i);
+                                    for (int j = 0; j < variants2.size(); j++) {
+                                        Variant variant2 = variants2.get(j);
+                                        if ((Arrays.equals(variant1.REF, variant2.REF) && Arrays.equals(variant1.ALT, variant2.ALT)) ||
+                                                (Arrays.equals(variant1.REF, variant2.ALT) && Arrays.equals(variant1.ALT, variant2.REF))) {
+                                            // 基本逻辑: 完全一致的碱基序列的位点直接合并，并且只合并一次
+                                            writeToFile(variant1.merge(variant2, mergeVariant), writer);
+                                            variants2.remove(variant2);
+                                            variants2Cache.add(variant2);
+                                            continue out;
+                                        }
+                                    }
+
+                                    // 没有遇到匹配的，此时记录下该位点
+                                    variants1new.add(variant1);
+                                }
+
+                                while (true) {
+                                    if (variants1new.size() == 0 && variants2.size() == 0) {
+                                        // 所有来自文件 1 和 文件 2 的位点都被匹配完成
+
+                                        break;
+                                    } else if (variants1new.size() == 0) {
+                                        // 所有来自文件 1 的位点都被匹配完成，此时文件 2 直接写入
+                                        for (Variant variant2 : variants2) {
+                                            mergeVariant2.chromosome = variant2.chromosome;
+                                            mergeVariant2.position = variant2.position;
+                                            mergeVariant2.ploidy = variant2.ploidy;
+                                            mergeVariant2.phased = variant2.phased;
+                                            mergeVariant2.ALT = variant2.ALT;
+                                            mergeVariant2.REF = variant2.REF;
+                                            System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
+                                            writeToFile(mergeVariant2, writer);
+                                        }
+
+                                        break;
+                                    } else if (variants2.size() == 0) {
+                                        // 所有来自文件 2 的位点都被匹配完成，此时文件 1 直接写入
+                                        for (Variant variant1 : variants1new) {
+                                            mergeVariant1.chromosome = variant1.chromosome;
+                                            mergeVariant1.position = variant1.position;
+                                            mergeVariant1.ploidy = variant1.ploidy;
+                                            mergeVariant1.phased = variant1.phased;
+                                            mergeVariant1.ALT = variant1.ALT;
+                                            mergeVariant1.REF = variant1.REF;
+                                            System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
+                                            writeToFile(mergeVariant1, writer);
+                                        }
+
+                                        break;
+                                    } else {
+                                        // 文件 1 和文件 2 都有位点，此时按照顺序匹配
+                                        SmartList<Variant> variants1NewTemp = new SmartList<>();
+                                        for (int i = 0; i < variants1new.size(); i++) {
+                                            Variant variant1 = variants1new.get(i);
+                                            if (variants2.size() > 0) {
+                                                Variant variant2 = variants2.popFirst();
+                                                writeToFile(variant1.merge(variant2, mergeVariant), writer);
+                                                variants2Cache.add(variant2);
+                                                continue;
+                                            }
+
+                                            // 没有遇到匹配的，此时记录下该位点
+                                            variants1NewTemp.add(variant1);
+                                        }
+                                        variants1new = variants1NewTemp;
+                                    }
+                                }
+                            }
+
+                            variants1Cache.add(variants1);
+                            variants1.clear();
+                            variants1 = reader1.readVariants(variants1Cache, position);
+                            condition1 = variants1 != null;
+                            variants2Cache.add(variants2);
+                            variants2.clear();
+                            variants2 = reader2.readVariants(variants2Cache, position);
+                            condition2 = variants2 != null;
+                        }
+                    }
+                }
+
+                if (position != null) {
+                    position.clear();
+                }
+            }
+
+            reader1.close();
+            reader2.close();
+            writer.close();
+
+            // 删除上一个临时文件
+            if (index > 0) {
+                FileUtils.delete(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp");
+            }
+            index++;
+        }
+
+        // 最后把文件名改为最终文件名
+        FileUtils.rename(this.task.getOutputFileName() + "." + (this.task.getManagers().size() - 2) + ".~$temp", this.task.getOutputFileName());
+    }
+
+    Variant mergeVariantWithAlleleCheck(Variant variant1, Variant variant2, Variant target) {
+        int AC12 = variant1.getAC();
+        int AN1 = variant1.getAN();
+        int AC11 = AN1 - AC12;
+        int AC22 = variant2.getAC();
+        int AN2 = variant2.getAN();
+        int AC21 = AN2 - AC22;
+        int alleleNum1 = variant1.getAlternativeAlleleNum();
+        int alleleNum2 = variant2.getAlternativeAlleleNum();
+        int AC = -1;
+        int AN = AN1 + AN2;
+
+        if (AC22 == 0 && AC12 == 0) {
+            // alt 都是 . 并且他们没有频率值
+            if (Arrays.equals(variant1.REF, variant2.REF)) {
+                variant2.ALT = variant1.ALT;
+                AC = 0;
+            } else if (Arrays.equals(variant1.REF, getInverseAllele(variant2.REF))) {
+                // f1: A .  f2: T .
+                variant2.REF = variant1.REF;
+                variant2.ALT = variant1.ALT;
+                AC = 0;
+            } else {
+                // f1: A .  f2: C .
+                variant1.ALT = variant2.REF;
+                variant2.ALT = variant1.REF;
+                AC = AN2;
+            }
+        } else if (AC12 == 0) {
+            // 第一个位点的 alt 为 0
+            byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
+            byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
+            if (Arrays.equals(variant1.REF, variant2.REF)) {
+                if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    variant2.REF = variant2.ALT;
+                    variant2.ALT = variant1.REF;
+                    variant1.ALT = variant2.REF;
+                    AC = AC21;
+                } else {
+                    variant1.ALT = variant2.ALT;
+                    AC = AC22;
+                }
+            } else if (Arrays.equals(variant1.REF, variant2.ALT)) {
+                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    variant2.ALT = variant2.REF;
+                    variant2.REF = variant1.REF;
+                    variant1.ALT = variant2.ALT;
+                    AC = AC22;
+                } else {
+                    variant1.ALT = variant2.REF;
+                    AC = AC21;
+                }
+            } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                variant2.REF = variant1.REF;
+                variant2.ALT = inverseAlleleVariant2ALT;
+                variant1.ALT = variant2.ALT;
+                AC = AC22;
+            } else if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                variant2.ALT = variant1.REF;
+                variant2.REF = inverseAlleleVariant2REF;
+                variant1.ALT = variant2.REF;
+                AC = AC21;
+            } else {
+                variant1.ALT = variant2.REF;
+
+                if (alleleNum2 == 2) {
+                    AC = AN2;
+                }
+            }
+        } else if (AC22 == 0) {
+            // 第二个位点的 alt 为 0
+            byte[] inverseAlleleVariant1ALT = getInverseAllele(variant1.ALT);
+            byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
+            if (Arrays.equals(variant2.REF, variant1.REF)) {
+                if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    variant2.REF = variant1.ALT;
+                    variant2.ALT = variant1.REF;
+                    AC = AC12 + AC21;
+                } else {
+                    variant2.ALT = variant1.ALT;
+                    AC = AC12;
+                }
+            } else if (Arrays.equals(variant2.REF, variant1.ALT)) {
+                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    variant2.REF = variant1.REF;
+                    variant2.ALT = variant1.ALT;
+                    AC = AC12;
+                } else {
+                    variant2.ALT = variant1.REF;
+                    AC = AC12 + AC21;
+                }
+            } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                variant2.REF = variant1.REF;
+                variant2.ALT = variant1.ALT;
+                AC = AC12;
+            } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                variant2.REF = variant1.ALT;
+                variant2.ALT = variant1.REF;
+                AC = AC12 + AC21;
+            } else {
+                variant2.ALT = variant1.REF;
+
+                if (alleleNum1 == 2) {
+                    AC = AC12 + AC21;
+                }
+            }
+        } else {
+            // 都不为 .
+            if (alleleNum1 == 2 && alleleNum2 == 2) {
+                // 都是 2 等位基因位点
+                byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
+                byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
+                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && Arrays.equals(variant1.ALT, inverseAlleleVariant2ALT)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                        variant2.REF = variant1.REF;
+                        variant2.ALT = variant1.ALT;
+                        AC = AC12 + AC22;
+                    }
+                } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                        variant2.REF = variant1.ALT;
+                        variant2.ALT = variant1.REF;
+                        AC = AC12 + AC21;
+                    }
+                } else if (Arrays.equals(variant1.REF, variant2.REF)) {
+                    AC = AC12 + AC22;
+                }
+            } else if (alleleNum1 == 2) {
+                byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
+                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                        variant2.REF = variant1.REF;
+                        variant2.ALT = getInverseAllele(variant2.ALT);
+                        AC = AC12 + AC22;
+                    }
+                } else if (Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                        variant2.REF = variant1.ALT;
+                        variant2.ALT = getInverseAllele(variant2.ALT);
+                    }
+                } else if (Arrays.equals(variant1.REF, variant2.REF)) {
+                    AC = AC12 + AC22;
+                }
+            } else if (alleleNum2 == 2) {
+                byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
+                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                        variant2.REF = variant1.REF;
+                        variant2.ALT = getInverseAllele(variant2.ALT);
+                        AC = AC12 + AC22;
+                    }
+                } else if (Arrays.equals(variant2.ALT, inverseAlleleVariant1REF)) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                        variant2.ALT = variant1.REF;
+                        variant2.REF = getInverseAllele(variant2.REF);
+                    }
+                } else if (Arrays.equals(variant1.REF, variant2.REF)) {
+                    AC = AC12 + AC22;
+                }
+            } else {
+                // 都是多等位基因位点，只检查 ref
+                if (Arrays.equals(variant1.REF, getInverseAllele(variant2.REF))) {
+                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                        variant2.REF = variant1.REF;
+                        variant2.ALT = getInverseAllele(variant2.ALT);
+                        AC = AC12 + AC22;
+                    }
+                } else if (Arrays.equals(variant1.REF, variant2.REF)) {
+                    AC = AC12 + AC22;
+                }
+            }
+        }
+
+        // 合并位点到 target
+        variant1.merge(variant2, target);
+
+        if (this.variantQC.filter(null, target.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
             return null;
         }
 
-        ArrayList<Integer> transferIndex = new ArrayList<>(managers.length);
-        for (int i = 0; i < managers.length; i++) {
-            if (managers[i].isPhased()) {
-                transferIndex.add(i);
-            }
-        }
-
-        return transferIndex.size() == 0 ? null : ArrayUtils.toIntegerArray(transferIndex);
-    }
-
-    int initMaxOriginMBEGsSize(GTBManager[] managers) {
-        int maxSize = 0;
-        for (GTBManager manager : managers) {
-            int currentSize = manager.getMaxDecompressedMBEGsSize();
-            if (currentSize > maxSize) {
-                maxSize = currentSize;
-            }
-        }
-
-        return maxSize;
-    }
-
-    /**
-     * 标准构造器，传入 EditTask，根据该提交任务执行工作
-     * @param task 待执行任务
-     */
-    MergeKernel(MergeTask task) throws IOException {
-        // 加载 MBEG 编码表
-        this.encoder = BEGEncoder.getEncoder(task.isPhased());
-        this.groupEncoder = MBEGEncoder.getEncoder(task.isPhased());
-
-        // 设置任务
-        this.task = task;
-
-        // 设定管理器
-        this.managers = this.task.getManagers().toArray();
-        this.variantQC = task.getVariantQC();
-        this.alleleQC = task.getAlleleQC();
-
-        // 创建数据管道
-        this.uncompressedPipLine = new DynamicPipeline<>(task.getThreads() << 2);
-
-        // 总体样本管理器，该步骤也能保证文件没有交集
-        GTBSubjectManager subjectManager = initSubjectManager(this.managers);
-
-        // 设定任务索引对及样本偏移量
-        this.indexLengths = initIndexLength(managers);
-        this.indexOffsets = initIndexOffsets(indexLengths);
-
-        // 向型转换器
-        this.phasedTransfers = initPhasedTransfer(task.isPhased(), managers);
-
-        // 总样本个数
-        this.validSubjectNum = ValueUtils.sum(indexLengths);
-
-        // 验证块大小参数
-        int blockSizeType = BlockSizeParameter.getSuggestBlockSizeType(task.getBlockSizeType(), validSubjectNum);
-        this.blockSize = BlockSizeParameter.getBlockSize(blockSizeType);
-        this.baseInfoManager = FileBaseInfoManager.of(task);
-        this.baseInfoManager.setBlockSizeType(blockSizeType);
-
-        // 解压基本参数
-        this.maxOriginMBEGsSize = initMaxOriginMBEGsSize(managers);
-
-        // 设置输出数据文件
-        this.outputFile = new FileStream(task.isInplace() ? this.task.getOutputFileName() + ".~$temp" : this.task.getOutputFileName(), FileOptions.CHANNEL_WRITER);
-
-        // 写入初始头信息
-        this.outputFile.write(ValueUtils.value2ByteArray(0, 5));
-
-        // 参考地址以 0 号文件为准
-        if (this.managers[0].getReference().size() != 0) {
-            // 写入 refer 网址
-            this.outputFile.write(this.managers[0].getReference());
-        }
-
-        // 写入换行符
-        this.outputFile.write(ByteCode.NEWLINE);
-
-        // 写入样本名
-        VolumeByteStream subjectSeq = ICompressor.compress(task.getCompressor(), task.getCompressionLevel(), subjectManager.getSubjects(), 0, subjectManager.getSubjects().length);
-        this.outputFile.writeIntegerValue(subjectSeq.size());
-        this.outputFile.write(subjectSeq);
-
-        // 创建线程池
-        ThreadPool threadPool = new ThreadPool(this.task.getThreads() + 1);
-
-        // 创建 Input 线程
-        threadPool.submit(() -> {
-            try {
-                SecondLevelTree secondLevelTree = new SecondLevelTree(this.managers, this.variantQC, blockSize);
-                MergeKernel.Task tasks;
-                while ((tasks = secondLevelTree.get()) != null) {
-                    // System.out.println(tasks.candidateNodes[0].position);
-                    this.uncompressedPipLine.put(true, tasks);
+        if (this.alleleQC.size() > 0) {
+            // 需要进行 allele QC
+            if (AC != -1) {
+                if (this.alleleQC.filter(AC, AN)) {
+                    return null;
+                } else {
+                    return target;
                 }
-
-                this.uncompressedPipLine.putStatus(this.task.getThreads(), false);
-            } catch (InterruptedException | IOException e) {
-                // e.printStackTrace();
-                throw new UnsupportedOperationException(e.getMessage());
-            }
-        });
-
-        // 创建工作线程及其上下文数据
-        IndexPair[][] indexPairs = new IndexPair[managers.length][];
-        int[][] eachLineSize = new int[managers.length][2];
-        int[] groupDecoderIndexes = new int[managers.length];
-        for (int i = 0; i < indexPairs.length; i++) {
-            int groupNum = managers[i].isPhased() ? 3 : 4;
-            indexPairs[i] = new IndexPair[this.indexLengths[i]];
-
-            for (int j = 0; j < indexPairs[i].length; j++) {
-                indexPairs[i][j] = new IndexPair(this.indexOffsets[i] + j, j, j / groupNum, j % groupNum);
-            }
-
-            int resBlockCodeGenotypeNum = managers[i].getSubjectNum() % groupNum;
-            eachLineSize[i][0] = (managers[i].getSubjectNum() / groupNum) + (resBlockCodeGenotypeNum == 0 ? 0 : 1);
-            eachLineSize[i][1] = managers[i].getSubjectNum();
-            groupDecoderIndexes[i] = managers[i].isPhased() ? 1 : 0;
-        }
-
-        threadPool.submit(() -> {
-                    try {
-                        // 创建解压器
-                        HashMap<Integer, IDecompressor> decompressors = new HashMap<>();
-                        for (GTBManager gtbManager : managers) {
-                            if (!decompressors.containsKey(gtbManager.getCompressorIndex())) {
-                                decompressors.put(gtbManager.getCompressorIndex(), IDecompressor.getInstance(gtbManager.getCompressorIndex()));
-                            }
-                        }
-
-                        if (task.getAlleleQC().size() > 0) {
-                            mergeBlockWithFilter(indexPairs, eachLineSize, groupDecoderIndexes, decompressors);
-                        } else {
-                            mergeBlock(indexPairs, eachLineSize, groupDecoderIndexes, decompressors);
-                        }
-                    } catch (Exception e) {
-                        // e.printStackTrace();
-                        throw new UnsupportedOperationException(e.getMessage());
-                    }
-                }
-                , this.task.getThreads());
-
-        // 关闭线程池，等待任务完成
-        threadPool.close();
-
-        // 生成最后的 gtb 文件
-        generateGTBFile();
-
-        // 标记为完成任务
-        this.status = true;
-
-        // 关闭数据管道
-        release();
-    }
-
-    static class Task {
-        int chromosomeIndex;
-        MergePositionGroup[] candidateNodes;
-
-        public Task(int chromosomeIndex, MergePositionGroup[] candidateNodes) {
-            this.chromosomeIndex = chromosomeIndex;
-            this.candidateNodes = candidateNodes;
-        }
-
-    }
-
-    /**
-     * 解除修改锁定，解除后无法保证数据安全，直接清除本类数据
-     */
-    void release() throws IOException {
-        // 如果是错误结束的，则需要删除文件
-        if (!this.status) {
-            this.outputFile.delete();
-        }
-    }
-
-    /**
-     * 合并多个 block 的信息
-     */
-    void mergeBlock(IndexPair[][] indexPairs, int[][] eachLineSize, int[] groupDecoderIndexes, HashMap<Integer, IDecompressor> decompressors) {
-        try {
-            Block<Boolean, Task> taskBlock = this.uncompressedPipLine.get();
-
-            if (taskBlock.getStatus()) {
-                // 文件流
-                FileStream[] fileStreams = new FileStream[this.managers.length];
-
-                // 打开文件
-                for (int i = 0; i < this.managers.length; i++) {
-                    // 文件操作流
-                    fileStreams[i] = this.managers[i].getFileStream();
-                }
-
-                // 未解压数据缓冲区
-                VolumeByteStream unDecompressedCache = new VolumeByteStream((blockSize * Math.max(20, validSubjectNum)) >> 1);
-
-                // 解压数据缓冲区
-                VolumeByteStream genotypeCache = new VolumeByteStream(this.maxOriginMBEGsSize);
-
-                // 创建本地编码缓冲区
-                VolumeByteStream encodedCache = new VolumeByteStream(this.validSubjectNum * this.blockSize);
-
-                // 未压缩的块
-                UncompressedBlock uncompressedBlock = new UncompressedBlock(this.validSubjectNum, this.task, this.blockSize, encodedCache);
-
-                // 创建压缩上下文
-                ShareCache caches = new ShareCache(encodedCache, unDecompressedCache);
-                GTBCompressionContext ctx = new GTBCompressionContext(this.task, this.validSubjectNum, caches);
-
-                do {
-                    // 提取任务
-                    MergePositionGroup[] candidateVariants = taskBlock.getData().candidateNodes;
-                    int chromosomeIndex = taskBlock.getData().chromosomeIndex;
-
-                    // 当前解压的节点索引，如果索引一致，则不会进行解压
-                    int currentNodeIndex;
-
-                    IDecompressor decompressor;
-                    VariantCoordinate info;
-                    int secondBlockStart;
-                    byte[] encodedCacheBase = encodedCache.getCache();
-
-                    // 先填充所有的位点碱基序列
-                    uncompressedBlock.seek = 0;
-                    for (MergePositionGroup positionGroup : candidateVariants) {
-                        for (MergePositionGroup.MultiAlleleGroup alleleGroup : positionGroup.groups) {
-                            VariantAbstract variant = uncompressedBlock.getCurrentVariant();
-                            variant.position = positionGroup.position;
-                            variant.setAllele(alleleGroup.allelesInfo, 0, alleleGroup.allelesInfo.length);
-                            variant.encoderIndex = alleleGroup.allelesNum == 2 ? 0 : 1;
-                            uncompressedBlock.seek++;
-                        }
-                    }
-
-                    for (int managerIndex = 0; managerIndex < managers.length; managerIndex++) {
-                        // 切换管理器时必须重置索引编号
-                        GTBNode node = null;
-                        currentNodeIndex = -1;
-                        secondBlockStart = -1;
-                        decompressor = decompressors.get(managers[managerIndex].getCompressorIndex());
-                        uncompressedBlock.seek = 0;
-
-                        // 依次对每一个候选位点进行处理
-                        for (MergePositionGroup candidateVariant : candidateVariants) {
-                            for (MergePositionGroup.MultiAlleleGroup alleleGroups : candidateVariant.groups) {
-                                VariantAbstract variant = uncompressedBlock.getCurrentVariant();
-                                MergePositionGroup.AlleleGroup alleleGroup = alleleGroups.getAlleleGroup(managerIndex);
-
-                                // 包含此位点时，进行复原
-                                if (alleleGroup != null && (info = alleleGroup.getVariantCoordinate(managerIndex)) != null) {
-                                    // 若当前的任务节点一致
-                                    if (currentNodeIndex != info.nodeIndex) {
-                                        unDecompressedCache.reset();
-                                        decompressor.reset();
-                                        genotypeCache.reset();
-                                        node = managers[managerIndex].getGTBNodes(chromosomeIndex).get(info.nodeIndex);
-                                        unDecompressedCache.makeSureCapacity(node.compressedGenotypesSize);
-
-                                        fileStreams[managerIndex].seek(node.blockSeek);
-                                        fileStreams[managerIndex].read(unDecompressedCache, node.compressedGenotypesSize);
-                                        decompressor.decompress(unDecompressedCache, genotypeCache);
-                                        currentNodeIndex = info.nodeIndex;
-                                        secondBlockStart = eachLineSize[managerIndex][0] * node.subBlockVariantNum[0];
-                                    }
-
-                                    byte[] transCode = alleleGroup.transCode;
-                                    // 还原基因型数据
-                                    if (transCode.length == 2) {
-                                        // 还原基因型数据
-                                        if (alleleGroup.trans) {
-                                            for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                                byte code = BEGTransfer.groupDecode(groupDecoderIndexes[managerIndex], genotypeCache.cacheOf(eachLineSize[managerIndex][0] * info.variantIndex + indexPair.groupIndex) & 0xFF, indexPair.codeIndex);
-                                                encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = code == 0 ? 0 : this.encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, code)], transCode[BEGDecoder.decodeHaplotype(1, code)]);
-                                            }
-                                        } else {
-                                            for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                                encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = BEGTransfer.groupDecode(groupDecoderIndexes[managerIndex], genotypeCache.cacheOf(eachLineSize[managerIndex][0] * info.variantIndex + indexPair.groupIndex) & 0xFF, indexPair.codeIndex);
-                                            }
-                                        }
-                                    } else {
-                                        // 基因型从 Pm  开始
-                                        int srcStart = secondBlockStart + eachLineSize[managerIndex][1] * (info.variantIndex - node.subBlockVariantNum[0]);
-                                        int dstStart = variant.encodedStart + indexOffsets[managerIndex];
-
-                                        if (alleleGroup.trans) {
-                                            for (int i = 0; i < indexLengths[managerIndex]; i++) {
-                                                byte code = genotypeCache.cacheOf(srcStart + i);
-                                                encodedCacheBase[dstStart + i] = code == 0 ? 0 : this.encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, code)], transCode[BEGDecoder.decodeHaplotype(1, code)]);
-                                            }
-                                        } else {
-                                            for (int i = 0; i < indexLengths[managerIndex]; i++) {
-                                                encodedCacheBase[dstStart + i] = genotypeCache.cacheOf(srcStart + i);
-                                            }
-                                        }
-
-                                    }
-
-                                } else {
-                                    // 不包含此位点，填充空基因型
-                                    for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                        encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = this.encoder.encodeMiss();
-                                    }
-                                }
-
-                                // 编码完成，挪动指针
-                                uncompressedBlock.seek++;
-                            }
-                        }
-                    }
-
-                    uncompressedBlock.chromosomeIndex = chromosomeIndex;
-
-                    for (MergePositionGroup variant : candidateVariants) {
-                        variant.freeMemory();
-                    }
-                    processGTBBlock(ctx, uncompressedBlock);
-                    taskBlock = this.uncompressedPipLine.get();
-                } while (taskBlock.getStatus());
-
-                // 关闭上下文
-                genotypeCache.close();
-                ctx.close();
-                caches.freeMemory();
-
-                // 关闭文件
-                for (int i = 0; i < this.managers.length; i++) {
-                    // 文件操作流
-                    fileStreams[i].close();
+            } else {
+                if (this.alleleQC.filter(target.getAC(), AN)) {
+                    return null;
+                } else {
+                    return target;
                 }
             }
-        } catch (IOException | InterruptedException e) {
-            // e.printStackTrace();  // 调试使用
-            throw new UnsupportedOperationException(e.getMessage());
+        } else {
+            return target;
         }
     }
 
-    /**
-     * 合并多个 block 的信息
-     */
-    void mergeBlockWithFilter(IndexPair[][] indexPairs, int[][] eachLineSize, int[] groupDecoderIndexes, HashMap<Integer, IDecompressor> decompressors) {
-        try {
-            Block<Boolean, Task> taskBlock = this.uncompressedPipLine.get();
-
-            if (taskBlock.getStatus()) {
-                // 文件流
-                FileStream[] fileStreams = new FileStream[this.managers.length];
-
-                // 打开文件
-                for (int i = 0; i < this.managers.length; i++) {
-                    // 文件操作流
-                    fileStreams[i] = this.managers[i].getFileStream();
-                }
-
-                // 未解压数据缓冲区
-                VolumeByteStream unDecompressedCache = new VolumeByteStream((blockSize * Math.max(20, validSubjectNum)) >> 1);
-
-                // 解压数据缓冲区
-                VolumeByteStream genotypeCache = new VolumeByteStream(this.maxOriginMBEGsSize);
-
-                // 创建本地编码缓冲区
-                VolumeByteStream encodedCache = new VolumeByteStream(this.validSubjectNum * this.blockSize);
-
-                // 未压缩的块
-                UncompressedBlock uncompressedBlock = new UncompressedBlock(this.validSubjectNum, this.task, this.blockSize, encodedCache);
-
-                // 创建压缩上下文
-                ShareCache caches = new ShareCache(encodedCache, unDecompressedCache);
-                GTBCompressionContext ctx = new GTBCompressionContext(this.task, this.validSubjectNum, caches);
-
-                do {
-                    // 提取任务
-                    MergePositionGroup[] candidateVariants = taskBlock.getData().candidateNodes;
-                    int chromosomeIndex = taskBlock.getData().chromosomeIndex;
-
-                    // 当前解压的节点索引，如果索引一致，则不会进行解压
-                    int currentNodeIndex;
-
-                    IDecompressor decompressor;
-                    VariantCoordinate info;
-                    int secondBlockStart;
-                    byte[] encodedCacheBase = encodedCache.getCache();
-
-                    // 先填充所有的位点碱基序列
-                    uncompressedBlock.seek = 0;
-                    for (MergePositionGroup positionGroup : candidateVariants) {
-                        for (MergePositionGroup.MultiAlleleGroup alleleGroup : positionGroup.groups) {
-                            VariantAbstract variant = uncompressedBlock.getCurrentVariant();
-                            variant.position = positionGroup.position;
-                            variant.setAllele(alleleGroup.allelesInfo, 0, alleleGroup.allelesInfo.length);
-                            variant.encoderIndex = alleleGroup.allelesNum == 2 ? 0 : 1;
-                            uncompressedBlock.seek++;
-                        }
-                    }
-
-                    // 对每个管理器解压数据
-                    for (int managerIndex = 0; managerIndex < managers.length; managerIndex++) {
-                        // 切换管理器时必须重置索引编号
-                        GTBNode node = null;
-                        currentNodeIndex = -1;
-                        secondBlockStart = -1;
-                        decompressor = decompressors.get(managers[managerIndex].getCompressorIndex());
-                        uncompressedBlock.seek = 0;
-
-                        // 依次对每一个候选位点进行处理
-                        for (MergePositionGroup candidateVariant : candidateVariants) {
-                            for (MergePositionGroup.MultiAlleleGroup alleleGroups : candidateVariant.groups) {
-                                VariantAbstract variant = uncompressedBlock.getCurrentVariant();
-                                MergePositionGroup.AlleleGroup alleleGroup = alleleGroups.getAlleleGroup(managerIndex);
-
-                                // 包含此位点时，进行复原
-                                if (alleleGroup != null && (info = alleleGroup.getVariantCoordinate(managerIndex)) != null) {
-                                    // 若当前的任务节点一致
-                                    if (currentNodeIndex != info.nodeIndex) {
-                                        unDecompressedCache.reset();
-                                        decompressor.reset();
-                                        genotypeCache.reset();
-                                        node = managers[managerIndex].getGTBNodes(chromosomeIndex).get(info.nodeIndex);
-                                        unDecompressedCache.makeSureCapacity(node.compressedGenotypesSize);
-
-                                        fileStreams[managerIndex].seek(node.blockSeek);
-                                        fileStreams[managerIndex].read(unDecompressedCache, node.compressedGenotypesSize);
-                                        decompressor.decompress(unDecompressedCache, genotypeCache);
-                                        currentNodeIndex = info.nodeIndex;
-                                        secondBlockStart = eachLineSize[managerIndex][0] * node.subBlockVariantNum[0];
-                                    }
-
-                                    // 还原基因型数据
-                                    byte[] transCode = alleleGroup.transCode;
-                                    // 还原基因型数据
-                                    if (transCode.length == 2) {
-                                        // 还原基因型数据
-                                        if (alleleGroup.trans) {
-                                            for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                                byte code = BEGTransfer.groupDecode(groupDecoderIndexes[managerIndex], genotypeCache.cacheOf(eachLineSize[managerIndex][0] * info.variantIndex + indexPair.groupIndex) & 0xFF, indexPair.codeIndex);
-                                                encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = code == 0 ? 0 : this.encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, code)], transCode[BEGDecoder.decodeHaplotype(1, code)]);
-                                            }
-                                        } else {
-                                            for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                                encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = BEGTransfer.groupDecode(groupDecoderIndexes[managerIndex], genotypeCache.cacheOf(eachLineSize[managerIndex][0] * info.variantIndex + indexPair.groupIndex) & 0xFF, indexPair.codeIndex);
-                                            }
-                                        }
-                                    } else {
-                                        // 基因型从 Pm  开始
-                                        int srcStart = secondBlockStart + eachLineSize[managerIndex][1] * (info.variantIndex - node.subBlockVariantNum[0]);
-                                        int dstStart = variant.encodedStart + indexOffsets[managerIndex];
-
-                                        if (alleleGroup.trans) {
-                                            for (int i = 0; i < indexLengths[managerIndex]; i++) {
-                                                byte code = genotypeCache.cacheOf(srcStart + i);
-                                                encodedCacheBase[dstStart + i] = code == 0 ? 0 : this.encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, code)], transCode[BEGDecoder.decodeHaplotype(1, code)]);
-                                            }
-                                        } else {
-                                            for (int i = 0; i < indexLengths[managerIndex]; i++) {
-                                                encodedCacheBase[dstStart + i] = genotypeCache.cacheOf(srcStart + i);
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    // 不包含此位点，填充空基因型
-                                    for (IndexPair indexPair : indexPairs[managerIndex]) {
-                                        encodedCacheBase[variant.encodedStart + indexPair.seqIndex] = this.encoder.encodeMiss();
-                                    }
-                                }
-
-                                // 编码完成，挪动指针
-                                uncompressedBlock.seek++;
-                            }
-                        }
-                    }
-
-                    int ploidy = ChromosomeInfo.getPloidy(chromosomeIndex);
-
-                    // 检验 alleleFreq
-                    for (int i = 0; i < uncompressedBlock.seek; i++) {
-                        int alleleCounts = 0;
-                        int validAllelesNum = 0;
-                        VariantAbstract variant = uncompressedBlock.variants[i];
-
-                        for (int j = 0; j < validSubjectNum; j++) {
-                            byte code = uncompressedBlock.encodedCache.cacheOf(variant.encodedStart + j);
-                            if (code != 0) {
-                                validAllelesNum += 1;
-                                alleleCounts += 2 - this.encoder.scoreOf(code);
-                            }
-                        }
-
-                        if (ploidy == 1) {
-                            alleleCounts = alleleCounts >> 1;
-                        } else {
-                            // 二倍型
-                            validAllelesNum = validAllelesNum << 1;
-                        }
-
-                        if (task.alleleQC.filter(alleleCounts, validAllelesNum)) {
-                            // 被过滤掉的位点
-                            variant.encoderIndex = -1;
-                        }
-                    }
-                    Arrays.sort(uncompressedBlock.variants, 0, uncompressedBlock.seek, Comparator.comparing(o -> -o.encoderIndex));
-                    for (int i = 0; i < uncompressedBlock.seek; i++) {
-                        if (uncompressedBlock.variants[i].encoderIndex == -1) {
-                            uncompressedBlock.seek = i;
-                            break;
-                        }
-                    }
-
-                    for (MergePositionGroup variant : candidateVariants) {
-                        variant.freeMemory();
-                    }
-                    uncompressedBlock.chromosomeIndex = chromosomeIndex;
-                    processGTBBlock(ctx, uncompressedBlock);
-                    taskBlock = this.uncompressedPipLine.get();
-                } while (taskBlock.getStatus());
-
-                // 关闭上下文
-                genotypeCache.close();
-                ctx.close();
-                caches.freeMemory();
-
-                // 关闭文件
-                for (int i = 0; i < this.managers.length; i++) {
-                    // 文件操作流
-                    fileStreams[i].close();
-                }
-            }
-        } catch (IOException | InterruptedException e) {
-            // e.printStackTrace();  // 调试使用
-            throw new UnsupportedOperationException(e.getMessage());
-        }
-    }
-
-
-    /**
-     * 处理 基因组 block
-     */
-    void processGTBBlock(GTBCompressionContext ctx, UncompressedBlock uncompressedBlock) throws IOException {
-        if (uncompressedBlock.seek == 0) {
+    void writeToFile(Variant variant, GTBWriter writer) throws IOException {
+        if (this.variantQC.filter(null, variant.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
             return;
         }
 
-        // 向型转换
-        if (this.phasedTransfers != null) {
-            VariantAbstract variant;
-            for (int phasedTransfer : this.phasedTransfers) {
-                for (int i = this.indexOffsets[phasedTransfer]; i < this.indexOffsets[phasedTransfer] + this.indexLengths[phasedTransfer]; i++) {
-                    for (int j = 0; j < uncompressedBlock.seek; j++) {
-                        variant = uncompressedBlock.variants[j];
-
-                        uncompressedBlock.encodedCache.cacheWrite(variant.encodedStart + i, BEGTransfer.toUnphased(uncompressedBlock.encodedCache.cacheOf(variant.encodedStart + i)));
-                    }
-                }
-            }
+        if (this.alleleQC.size() > 0 && this.alleleQC.filter(variant.getAC(), variant.getAN())) {
+            return;
         }
 
-        // 绑定 inputBlock 数据
-        Pair<GTBNode, VolumeByteStream> processedBlock = ctx.process(uncompressedBlock);
-
-        // 获取估计大小
-        int estimateSize = processedBlock.key.getEstimateDecompressedSize(validSubjectNum);
-
-        // 写入数据和节点信息
-        synchronized (this.GTBNodeCache) {
-            this.outputFile.write(processedBlock.value);
-            this.GTBNodeCache.add(processedBlock.key);
-
-            if (estimateSize > maxEstimateSize) {
-                maxEstimateSize = estimateSize;
-            }
-        }
-
-        // 关闭上下文
-        processedBlock.value.reset();
-        uncompressedBlock.reset();
+        writer.write(variant);
     }
 
-    /**
-     * 生成最终的 GTB 文件
-     */
-    void generateGTBFile() throws IOException {
-        // 写入块头信息
-        VolumeByteStream headerInfo = new VolumeByteStream(this.GTBNodeCache.size() * 25);
-        for (GTBNode node : this.GTBNodeCache) {
-            node.toTransFormat(headerInfo);
+    byte[] getInverseAllele(byte[] allele) {
+        byte[] alleleInverse = new byte[allele.length];
+        for (int i = 0; i < alleleInverse.length; i++) {
+            if (complementaryBase.containsKey(allele[i])) {
+                int code = complementaryBase.get(allele[i]);
+                alleleInverse[i] = (byte) code;
+            } else {
+                alleleInverse[i] = allele[i];
+            }
         }
-        this.outputFile.write(headerInfo);
 
-        // 修改文件标志信息
-        GTBTree tree = new GTBTree(this.GTBNodeCache);
-        this.baseInfoManager.setOrderedGTB(tree.isOrder());
-        this.baseInfoManager.setEstimateDecompressedBlockSize(maxEstimateSize);
-        this.outputFile.seek(0);
-        this.outputFile.write(this.baseInfoManager.build());
-        this.outputFile.write(ValueUtils.value2ByteArray(this.GTBNodeCache.size(), 3));
-        this.outputFile.close();
-
-        if (this.task.isInplace()) {
-            this.outputFile.rename(this.task.getOutputFileName());
-        }
+        return alleleInverse;
     }
 }

@@ -94,6 +94,7 @@ public class Variant {
 
     /**
      * 获取可替代等位基因的个数
+     *
      * @return 可替代等位基因个数
      */
     public int getAlternativeAlleleNum() {
@@ -102,6 +103,7 @@ public class Variant {
 
     /**
      * 获取 AC 值, 该值已通过倍型校正
+     *
      * @return 获取 AC 值
      */
     public int getAC() {
@@ -109,7 +111,17 @@ public class Variant {
     }
 
     /**
+     * 获取 AC 值, 该值已通过倍型校正
+     *
+     * @return 获取 AC 值
+     */
+    public int[] getACs() {
+        return apply(ACsValueFormatter.INSTANCE);
+    }
+
+    /**
      * 获取 AN 值, 该值已通过倍型校正
+     *
      * @return 获取 AN 值
      */
     public int getAN() {
@@ -117,7 +129,15 @@ public class Variant {
     }
 
     /**
+     * 获取 基因型计数值
+     */
+    public int[] getGenotypeCounts() {
+        return apply(GenotypeCountsFormatter.INSTANCE);
+    }
+
+    /**
      * 获取缺失样本的个数
+     *
      * @return 缺失样本个数
      */
     public int getMissSubjectNum() {
@@ -126,6 +146,7 @@ public class Variant {
 
     /**
      * 获取 AF
+     *
      * @return AF 值，等位基因频率
      */
     public double getAF() {
@@ -134,6 +155,7 @@ public class Variant {
 
     /**
      * 获取所有等位基因形式的频率值
+     *
      * @return AFs 值，等位基因频率
      */
     public double[] getAFs() {
@@ -142,6 +164,7 @@ public class Variant {
 
     /**
      * 获取 MAF
+     *
      * @return MAF 值，次等位基因频率
      */
     public double getMAF() {
@@ -171,7 +194,8 @@ public class Variant {
 
     /**
      * 获取位点的 BEG 编码
-     * @param index 编码索引
+     *
+     * @param index          编码索引
      * @param haplotypeIndex 单倍型索引 (1 / 2)
      */
     public int getGenotypeCode(int index, int haplotypeIndex) {
@@ -274,6 +298,7 @@ public class Variant {
 
     /**
      * 横向合并位点 (认为它们来自不同的测序样本)
+     *
      * @param otherVariant 另一个变异位点
      */
     public Variant merge(Variant otherVariant) {
@@ -281,29 +306,23 @@ public class Variant {
     }
 
     /**
-     * 横向合并位点 (空基因型)
+     * 横向合并位点 (认为它们来自不同的测序样本)
+     *
+     * @param otherVariant 另一个变异位点
      */
-    public Variant merge(int missNum) {
-        Variant mergeVariant = new Variant();
-        mergeVariant.chromosome = this.chromosome;
-        mergeVariant.position = this.position;
-        mergeVariant.ploidy = this.ploidy;
-        mergeVariant.phased = this.phased;
-        mergeVariant.ALT = this.ALT;
-        mergeVariant.REF = this.REF;
-        mergeVariant.BEGs = new byte[missNum + this.BEGs.length];
-        System.arraycopy(this.BEGs, 0, mergeVariant.BEGs, 0, this.BEGs.length);
-        return mergeVariant;
+    public Variant merge(Variant otherVariant, Variant target) {
+        return merge(otherVariant, target, true);
     }
 
     /**
      * 横向合并位点 (认为它们来自不同的测序样本)
-     * @param otherVariant 另一个变异位点
+     *
+     * @param otherVariant     另一个变异位点
      * @param verifyCoordinate 是否验证坐标
      */
     public Variant merge(final Variant otherVariant, boolean verifyCoordinate) {
         if (verifyCoordinate && !(otherVariant.chromosome.equals(this.chromosome) && (otherVariant.position == this.position))) {
-            throw new UnsupportedOperationException("Requests to merge variant with different coordinates are not allowed.");
+            throw new UnsupportedOperationException("merge variant with different coordinates are not allowed");
         }
 
         Variant mergeVariant = new Variant();
@@ -390,6 +409,106 @@ public class Variant {
     }
 
     /**
+     * 横向合并位点 (认为它们来自不同的测序样本)
+     *
+     * @param otherVariant     另一个变异位点
+     * @param verifyCoordinate 是否验证坐标
+     */
+    public Variant merge(final Variant otherVariant, Variant target, boolean verifyCoordinate) {
+        if (verifyCoordinate && !(otherVariant.chromosome.equals(this.chromosome) && (otherVariant.position == this.position))) {
+            throw new UnsupportedOperationException("merge variant with different coordinates are not allowed");
+        }
+
+        target.chromosome = this.chromosome;
+        target.position = this.position;
+        target.ploidy = this.ploidy;
+        target.phased = this.phased;
+
+        // 传入位点作为主位点
+        if ((ArrayUtils.equal(REF, otherVariant.REF) && (ArrayUtils.equal(ALT, otherVariant.ALT)))) {
+            target.REF = this.REF;
+            target.ALT = this.ALT;
+            if (target.BEGs.length == this.BEGs.length + otherVariant.BEGs.length) {
+                System.arraycopy(this.BEGs, 0, target.BEGs, 0, this.BEGs.length);
+                System.arraycopy(otherVariant.BEGs, 0, target.BEGs, this.BEGs.length, otherVariant.BEGs.length);
+            } else {
+                target.BEGs = ArrayUtils.merge(this.BEGs, otherVariant.BEGs);
+            }
+        } else {
+            // 获取等位基因个数
+            int allelesNum = getAlternativeAlleleNum();
+
+            // 此时处理的情况复杂的多，会变成多等位基因位点
+            VolumeByteStream finalALT = new VolumeByteStream(ALT.length + otherVariant.REF.length + otherVariant.ALT.length + 2);
+            finalALT.write(ALT);
+
+            int otherAllelesNum = otherVariant.getAlternativeAlleleNum();
+            byte[] transCode = new byte[otherAllelesNum];
+
+            byte[][] oldMatchers = new byte[otherAllelesNum][];
+            byte[][] newMatchers = new byte[allelesNum][];
+
+            oldMatchers[0] = otherVariant.REF;
+            int lastPointer = 0;
+            int searchPointer = 1;
+            int alleleIndex = 1;
+
+            while (searchPointer < otherVariant.ALT.length) {
+                if (otherVariant.ALT[searchPointer] == ByteCode.COMMA) {
+                    oldMatchers[alleleIndex++] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
+                    lastPointer = searchPointer + 1;
+                }
+
+                searchPointer++;
+            }
+            oldMatchers[alleleIndex] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
+
+            newMatchers[0] = REF;
+            lastPointer = 0;
+            searchPointer = 1;
+            alleleIndex = 1;
+
+            while (searchPointer < ALT.length) {
+                if (ALT[searchPointer] == ByteCode.COMMA) {
+                    newMatchers[alleleIndex++] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
+                    lastPointer = searchPointer + 1;
+                }
+
+                searchPointer++;
+            }
+            newMatchers[alleleIndex] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
+
+            out:
+            for (byte id1 = 0; id1 < oldMatchers.length; id1++) {
+                for (byte id2 = 0; id2 < newMatchers.length; id2++) {
+                    if (ArrayUtils.equal(oldMatchers[id1], newMatchers[id2])) {
+                        transCode[id1] = id2;
+                        continue out;
+                    }
+                }
+
+                // 没有发现匹配的，说明是新碱基
+                transCode[id1] = (byte) allelesNum++;
+                finalALT.write(ByteCode.COMMA);
+                finalALT.write(oldMatchers[id1]);
+            }
+            target.REF = this.REF;
+            target.ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
+
+            // 转换编码
+            BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
+            if (target.BEGs.length != this.BEGs.length + otherVariant.BEGs.length) {
+                target.BEGs = new byte[this.BEGs.length + otherVariant.BEGs.length];
+            }
+            System.arraycopy(this.BEGs, 0, target.BEGs, 0, this.BEGs.length);
+            for (int i = 0; i < otherVariant.BEGs.length; i++) {
+                target.BEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
+            }
+        }
+        return target;
+    }
+
+    /**
      * 转为 VCF 格式
      */
     public byte[] toVCF() {
@@ -398,6 +517,7 @@ public class Variant {
 
     /**
      * 转为 VCF 格式
+     *
      * @param cache 输出缓冲区
      */
     public int toVCF(VolumeByteStream cache) {
@@ -413,6 +533,7 @@ public class Variant {
 
     /**
      * 转为 VCF 位点数据 (非基因型数据)
+     *
      * @param cache 输出缓冲区
      */
     public int toVCFSite(VolumeByteStream cache) {
@@ -421,6 +542,7 @@ public class Variant {
 
     /**
      * 转为 VCF 格式
+     *
      * @param info 是否写入 INFO 信息 (AC, AN, AF)
      */
     public byte[] toVCF(boolean info) {
@@ -433,6 +555,7 @@ public class Variant {
 
     /**
      * 转为 VCF 格式
+     *
      * @param info 是否写入 INFO 信息 (AC, AN, AF)
      */
     public int toVCF(boolean info, VolumeByteStream cache) {
@@ -452,6 +575,7 @@ public class Variant {
 
     /**
      * 转为 unphased 基因型
+     *
      * @param inplace 原位改变基因型的向型
      */
     public byte[] toUnphased(boolean inplace) {
@@ -472,6 +596,7 @@ public class Variant {
 
     /**
      * 转为任意格式
+     *
      * @param variantFormatter 序列格式转换器
      */
     public <Out> Out apply(VariantFormatter<Void, Out> variantFormatter) {
@@ -480,6 +605,7 @@ public class Variant {
 
     /**
      * 转为任意格式
+     *
      * @param variantFormatter 序列格式转换器
      */
     public <In, Out> Out apply(VariantFormatter<In, Out> variantFormatter, In params) {
@@ -488,8 +614,9 @@ public class Variant {
 
     /**
      * 转为任意格式
+     *
      * @param variantFormatter 序列格式转换器
-     * @param cache 输出缓冲区
+     * @param cache            输出缓冲区
      */
     public <Out> int apply(VariantFormatter<Void, Out> variantFormatter, VolumeByteStream cache) {
         return variantFormatter.apply(this, cache);
@@ -524,11 +651,15 @@ public class Variant {
 
     @Override
     public String toString() {
-        return "Variant{" +
-                "chromosome='" + chromosome + '\'' +
-                ", position=" + position +
-                ", REF='" + new String(REF) + '\'' +
-                ", ALT='" + new String(ALT) + '\'' +
-                '}';
+        if (chromosome == null || REF == null || ALT == null) {
+            return "Variant{empty}";
+        } else{
+            return "Variant{" +
+                    "chromosome='" + chromosome + '\'' +
+                    ", position=" + position +
+                    ", REF='" + new String(REF) + '\'' +
+                    ", ALT='" + new String(ALT) + '\'' +
+                    '}';
+        }
     }
 }

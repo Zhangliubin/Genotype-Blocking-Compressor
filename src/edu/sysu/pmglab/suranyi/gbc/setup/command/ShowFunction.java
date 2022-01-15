@@ -2,11 +2,14 @@ package edu.sysu.pmglab.suranyi.gbc.setup.command;
 
 import edu.sysu.pmglab.suranyi.commandParser.CommandMatcher;
 import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
+import edu.sysu.pmglab.suranyi.gbc.coder.decoder.BEGDecoder;
+import edu.sysu.pmglab.suranyi.gbc.coder.encoder.BEGEncoder;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.ManagerStringBuilder;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.GTBReader;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.formatter.VariantFormatter;
 
 import java.io.IOException;
 
@@ -46,8 +49,7 @@ enum ShowFunction {
 
             // 仅打印位置信息
             if (options.isPassedIn("--list-position-only")) {
-                GTBReader reader = new GTBReader((String) options.get("show"));
-                reader.selectSubjects(new int[]{});
+                GTBReader reader = new GTBReader((String) options.get("show"), false, false);
 
                 if (options.isPassedIn("--assign-chromosome")) {
                     reader.limit((String[]) options.get("--assign-chromosome"));
@@ -60,7 +62,7 @@ enum ShowFunction {
                 return 0;
             }
 
-            // 仅打印位置信息
+            // 仅打印位点的位置、碱基信息
             if (options.isPassedIn("--list-site")) {
                 GTBReader reader = new GTBReader((String) options.get("show"));
 
@@ -68,9 +70,64 @@ enum ShowFunction {
                     reader.limit((String[]) options.get("--assign-chromosome"));
                 }
 
-                for (Variant variant : reader) {
-                    System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN());
+                // 打印基因型频率
+                if (options.isPassedIn("--list-gt")) {
+                    for (Variant variant : reader) {
+                        String gtInfo = variant.apply(new VariantFormatter<Void, String>() {
+                            @Override
+                            public String apply(Variant variant) {
+                                int alleleNums = variant.getAlternativeAlleleNum();
+                                int[] counts = variant.getGenotypeCounts();
+
+                                StringBuilder builder = new StringBuilder();
+                                BEGDecoder decoder = BEGDecoder.getDecoder(variant.phased);
+                                BEGEncoder encoder = BEGEncoder.getEncoder(variant.phased);
+                                if (variant.phased) {
+                                    if (variant.ploidy == 1) {
+                                        // 单倍型时
+                                        builder.append(";").append(".").append("=" + counts[0]);
+
+                                        for (int i = 0; i < alleleNums; i++) {
+                                            int code = encoder.encode(i, i);
+                                            builder.append(";").append(new String(decoder.decode(variant.ploidy, code))).append("=" + counts[code]);
+                                        }
+                                    } else {
+                                        for (int i = 0; i < counts.length; i++) {
+                                            builder.append(";").append(new String(decoder.decode(variant.ploidy, i))).append("=" + counts[i]);
+                                        }
+                                    }
+                                } else {
+                                    // unphased 时一部分基因型是没有的
+                                    if (variant.ploidy == 1) {
+                                        // 单倍型时
+                                        builder.append(";").append(".").append("=" + counts[0]);
+
+                                        for (int i = 0; i < alleleNums; i++) {
+                                            int code = encoder.encode(i, i);
+                                            builder.append(";").append(new String(decoder.decode(variant.ploidy, code))).append("=" + counts[code]);
+                                        }
+                                    } else {
+                                        builder.append(";").append("./.").append("=" + counts[0]);
+                                        for (int i = 0; i < alleleNums; i++) {
+                                            for (int j = i; j < alleleNums; j++) {
+                                                int code = encoder.encode(i, j);
+                                                builder.append(";").append(new String(decoder.decode(variant.ploidy, code))).append("=" + counts[code]);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                return builder.toString();
+                            }
+                        });
+                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN() + gtInfo);
+                    }
+                } else {
+                    for (Variant variant : reader) {
+                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN());
+                    }
                 }
+
 
                 return 0;
             }

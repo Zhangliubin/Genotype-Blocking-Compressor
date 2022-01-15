@@ -6,6 +6,7 @@ import edu.sysu.pmglab.suranyi.commandParser.converter.array.StringArrayConverte
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.KVConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalDoubleRangeConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalIntRangeConverter;
+import edu.sysu.pmglab.suranyi.commandParser.converter.value.DoubleConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.IntConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.PassedInConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.StringConverter;
@@ -19,6 +20,7 @@ import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.ITask;
 import edu.sysu.pmglab.suranyi.gbc.core.build.BlockSizeParameter;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleACController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleAFController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleANController;
@@ -158,11 +160,42 @@ enum RebuildParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
+
+        parser.register("--align")
+                .addOptions(DEBUG)
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+        parser.register("--check-allele")
+                .addOptions(DEBUG)
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+        parser.register("--p-value")
+                .addOptions(DEBUG)
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
+                .setFormat("--p-value <float, 0.000001~0.5>");
+        parser.register("--freq-gap")
+                .addOptions(DEBUG)
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
+                .setFormat("--freq-gap <float, 0.000001~0.5>");
+
         parser.register("--subject", "-s")
                 .arity(1)
                 .convertTo(new StringArrayConverter(","))
                 .setOptionGroup("Subset Selection Options")
-                .setDescription("Rebuild the GTB for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'")
+                .setDescription("Rebuild the GTB for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'.")
                 .setFormat("'-s <string>,<string>,...' or '-s @<file>'");
         parser.register("--delete")
                 .arity(1)

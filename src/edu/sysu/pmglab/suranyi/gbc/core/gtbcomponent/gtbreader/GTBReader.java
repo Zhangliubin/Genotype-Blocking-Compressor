@@ -65,18 +65,26 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
     }
 
     public GTBReader(Pointer pointer) throws IOException {
-        this(pointer, pointer.manager.isPhased());
+        this(pointer, pointer.manager.isPhased(), true);
     }
 
     public GTBReader(GTBManager manager, boolean phased) throws IOException {
-        this(new Pointer(manager), phased);
+        this(new Pointer(manager), phased, true);
     }
 
     public GTBReader(String fileName, boolean phased) throws IOException {
-        this(new Pointer(GTBRootCache.get(fileName)), phased);
+        this(new Pointer(GTBRootCache.get(fileName)), phased, true);
     }
 
-    public GTBReader(Pointer pointer, boolean phased) throws IOException {
+    public GTBReader(GTBManager manager, boolean phased, boolean decompressGT) throws IOException {
+        this(new Pointer(manager), phased, decompressGT);
+    }
+
+    public GTBReader(String fileName, boolean phased, boolean decompressGT) throws IOException {
+        this(new Pointer(GTBRootCache.get(fileName)), phased, decompressGT);
+    }
+
+    public GTBReader(Pointer pointer, boolean phased, boolean decompressGT) throws IOException {
         // 获取文件管理器
         this.manager = pointer.manager;
 
@@ -86,11 +94,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
         }
 
         // 设定解压的ID对
-        initPairs();
+        initPairs(decompressGT);
 
         // 初始化指针
         this.pointer = pointer;
-        this.cache = new DecompressionCache(this.manager);
+        this.cache = new DecompressionCache(this.manager, decompressGT);
 
         int eachCodeGenotypeNum = this.manager.isPhased() ? 3 : 4;
         int resBlockCodeGenotypeNum = this.manager.getSubjectNum() % eachCodeGenotypeNum;
@@ -204,14 +212,20 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                 "\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT");
     }
 
-    private void initPairs() {
-        int eachGroupNum = this.manager.isPhased() ? 3 : 4;
-        if (this.subjectIndexes == null) {
-            pairs = new IndexPair[this.manager.getSubjectNum()];
+    private void initPairs(boolean decompressGT) {
+        if (decompressGT) {
+            int eachGroupNum = this.manager.isPhased() ? 3 : 4;
+            if (this.subjectIndexes == null) {
+                pairs = new IndexPair[this.manager.getSubjectNum()];
 
-            for (int i = 0; i < pairs.length; i++) {
-                pairs[i] = new IndexPair(i, i / eachGroupNum, i % eachGroupNum);
+                for (int i = 0; i < pairs.length; i++) {
+                    pairs[i] = new IndexPair(i, i / eachGroupNum, i % eachGroupNum);
+                }
             }
+        } else {
+            this.subjectIndexes = new int[]{};
+
+            pairs = new IndexPair[0];
         }
     }
 
@@ -239,6 +253,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点，带有位点位置约束
      */
     public Variant readVariant(Set<Integer> condition) throws IOException {
+        if (condition == null) {
+            return readVariant();
+        }
+
         TaskVariant taskVariant;
 
         do {
@@ -269,6 +287,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点，带有位点位置约束
      */
     public Variant readVariant(Map<?, Set<Integer>> condition) throws IOException {
+        if (condition == null) {
+            return readVariant();
+        }
+
         TaskVariant taskVariant;
 
         do {
@@ -344,6 +366,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点，带有位点位置约束 (公共坐标构成)
      */
     public Variant[] readVariants(Set<Integer> condition) throws IOException {
+        if (condition == null) {
+            return readVariants();
+        }
+
         final Variant variant = readVariant(condition);
 
         if (variant != null) {
@@ -383,6 +409,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点，带有位点位置约束 (公共坐标构成)
      */
     public Variant[] readVariants(Map<?, Set<Integer>> condition) throws IOException {
+        if (condition == null) {
+            return readVariants();
+        }
+
         final Variant variant = readVariant(condition);
         if (variant != null) {
             TaskVariant taskVariant;
@@ -462,6 +492,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点 (公共坐标构成)
      */
     public boolean readVariant(Variant variant, Set<Integer> condition) throws IOException {
+        if (condition == null) {
+            return readVariant(variant);
+        }
+
         TaskVariant taskVariant;
         GTBNode node;
         while (pointer.chromosomeIndex != -1) {
@@ -513,6 +547,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 读取下一个位点 (公共坐标构成)
      */
     public boolean readVariant(Variant variant, Map<?, Set<Integer>> condition) throws IOException {
+        if (condition == null) {
+            return readVariant(variant);
+        }
+
         TaskVariant taskVariant;
         GTBNode node;
         while (pointer.chromosomeIndex != -1) {
@@ -621,9 +659,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant.REF = this.cache.allelesPosCache.cacheOf(taskVariant.alleleStart, sepIndex);
                     variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
                     variant.phased = this.phased;
-
+                    variants.add(variant);
                     pointer.next();
                 } else {
+                    variantCache.add(variant);
                     break;
                 }
             }
@@ -636,6 +675,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 从 variantCache 中获取位点，并将结果放入另一区域
      */
     public SmartList<Variant> readVariants(SmartList<Variant> variantCache, Set<Integer> condition) throws IOException {
+        if (condition == null) {
+            return readVariants(variantCache);
+        }
+
         Variant variant;
         if (variantCache.size() == 0) {
             variant = new Variant();
@@ -688,8 +731,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
                     variant.phased = this.phased;
 
+                    variants.add(variant);
                     pointer.next();
                 } else {
+                    variantCache.add(variant);
                     break;
                 }
             }
@@ -702,6 +747,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
      * 从 variantCache 中获取位点，并将结果放入另一区域
      */
     public SmartList<Variant> readVariants(SmartList<Variant> variantCache, Map<?, Set<Integer>> condition) throws IOException {
+        if (condition == null) {
+            return readVariants(variantCache);
+        }
+
         Variant variant;
         if (variantCache.size() == 0) {
             variant = new Variant();
@@ -754,8 +803,10 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant.ALT = this.cache.allelesPosCache.cacheOf(sepIndex + 1, taskVariant.alleleStart + taskVariant.alleleLength);
                     variant.phased = this.phased;
 
+                    variants.add(variant);
                     pointer.next();
                 } else {
+                    variantCache.add(variant);
                     break;
                 }
             }
@@ -941,7 +992,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
     }
 
     public void selectAllSubjects() {
-        initPairs();
+        initPairs(true);
     }
 
     public String[] getAllSubjects() {

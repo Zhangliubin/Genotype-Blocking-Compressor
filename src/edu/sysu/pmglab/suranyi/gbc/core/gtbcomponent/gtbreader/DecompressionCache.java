@@ -30,17 +30,35 @@ class DecompressionCache {
     boolean isGTDecompress;
 
     public DecompressionCache(GTBManager manager) throws IOException {
-        this.genotypesCache = new VolumeByteStream(manager.getMaxDecompressedMBEGsSize());
-        this.allelesPosCache = new VolumeByteStream(manager.getMaxDecompressedAllelesSize());
-        this.undecompressedCache = new VolumeByteStream(2 << 20);
-        this.decompressor = IDecompressor.getInstance(manager.getCompressorIndex());
+        this(manager, true);
+    }
 
-        this.taskVariants = new TaskVariant[manager.getBlockSize()];
-        for (int i = 0; i < taskVariants.length; i++) {
-            this.taskVariants[i] = new TaskVariant();
+    public DecompressionCache(GTBManager manager, boolean decompressGT) throws IOException {
+        if (decompressGT) {
+            this.genotypesCache = new VolumeByteStream(manager.getMaxDecompressedMBEGsSize());
+            this.allelesPosCache = new VolumeByteStream(manager.getMaxDecompressedAllelesSize());
+            this.undecompressedCache = new VolumeByteStream(2 << 20);
+            this.decompressor = IDecompressor.getInstance(manager.getCompressorIndex());
+
+            this.taskVariants = new TaskVariant[manager.getBlockSize()];
+            for (int i = 0; i < taskVariants.length; i++) {
+                this.taskVariants[i] = new TaskVariant();
+            }
+
+            this.fileStream = manager.getFileStream();
+        } else {
+            this.genotypesCache = new VolumeByteStream(0);
+            this.allelesPosCache = new VolumeByteStream(manager.getMaxDecompressedAllelesSize());
+            this.undecompressedCache = new VolumeByteStream(2 << 20);
+            this.decompressor = IDecompressor.getInstance(manager.getCompressorIndex());
+
+            this.taskVariants = new TaskVariant[manager.getBlockSize()];
+            for (int i = 0; i < taskVariants.length; i++) {
+                this.taskVariants[i] = new TaskVariant();
+            }
+
+            this.fileStream = manager.getFileStream();
         }
-
-        this.fileStream = manager.getFileStream();
     }
 
     public void fill(Pointer pointer, boolean decompressGT) throws IOException {

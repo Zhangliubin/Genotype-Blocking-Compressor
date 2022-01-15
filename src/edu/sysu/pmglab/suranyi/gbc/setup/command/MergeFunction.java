@@ -5,6 +5,8 @@ import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.easytools.FileUtils;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.build.MergeTask;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleFreqTestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 
 import java.io.IOException;
 import java.util.Scanner;
@@ -87,12 +89,16 @@ enum MergeFunction {
                 task.setVariantQualityControlAllelesNum((int) options.get("--max-allele"));
             }
 
-            if (options.isPassedIn("--check-af")) {
-                task.setCheckAf(true);
-                task.setIdentifyAF((double) options.get("--ide-af"));
-                task.setKeepAll(options.isPassedIn("--keep-all"));
-                task.setDeleteAF0(options.isPassedIn("--del-af0"));
+            if (options.isPassedIn("--check-allele")) {
+                if (options.isPassedIn("--freq-gap")) {
+                    task.setAlleleChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap")));
+                } else if (options.isPassedIn("--p-value")) {
+                    task.setAlleleChecker(new Chi2TestChecker((double) options.get("--p-value")));
+                } else {
+                    task.setAlleleChecker(true);
+                }
             }
+            task.setSiteMergeType((String) (options.get("--method")));
 
             // 输出日志
             System.out.println("INFO    Start running " + task);

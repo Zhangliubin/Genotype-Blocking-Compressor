@@ -11,6 +11,7 @@ import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
 import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.AT_MOST_ONE;
+import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.PRECONDITION;
 
 enum ShowParser {
     /**
@@ -111,12 +112,18 @@ enum ShowParser {
                 .arity(0)
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("GTB View Options")
-                .setDescription("Print coordinates (i.e., CHROM,POSITION) of the GTB file only.");
+                .setDescription("Print coordinates, alleles and INFOs (i.e., CHROM,POSITION,REF,ALT,INFO) of the GTB file.");
+        parser.register("--list-gt")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("GTB View Options")
+                .setDescription("Print genotype frequency of the GTB file (used with '--list-site').");
 
         // add commandRules
         parser.registerRule("--list-subject-only", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--assign-chromosome", "--full"}, AT_MOST_ONE);
         parser.registerRule("--list-position-only", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--full", "--list-subject-only"}, AT_MOST_ONE);
         parser.registerRule("--list-site", new String[]{"--list-md5", "--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--full", "--list-subject-only", "--list-position-only"}, AT_MOST_ONE);
         parser.registerRule("--full", new String[]{"--list-baseInfo", "--list-subject", "--list-tree", "--list-node", "--assign-chromosome"}, AT_MOST_ONE);
+        parser.registerRule("--list-site", "--list-gt", PRECONDITION);
     }
 }
