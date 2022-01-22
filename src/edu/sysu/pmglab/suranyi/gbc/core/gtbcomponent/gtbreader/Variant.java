@@ -1,5 +1,7 @@
 package edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader;
 
+import edu.sysu.pmglab.suranyi.check.Assert;
+import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
@@ -7,6 +9,7 @@ import edu.sysu.pmglab.suranyi.gbc.coder.BEGTransfer;
 import edu.sysu.pmglab.suranyi.gbc.coder.decoder.BEGDecoder;
 import edu.sysu.pmglab.suranyi.gbc.coder.encoder.BEGEncoder;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
+import edu.sysu.pmglab.suranyi.gbc.core.exception.GTBComponentException;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.formatter.*;
 
 import java.util.Arrays;
@@ -42,6 +45,148 @@ public class Variant {
         this.BEGs = ArrayUtils.copyOfRange(variant.BEGs, 0, variant.BEGs.length);
         this.phased = variant.phased;
         this.property = variant.property;
+    }
+
+    /**
+     * 将多个二等位基因/多等位基因位点合并为单个位点
+     *
+     * @param variants 等位基因列表
+     */
+    public static Variant join(SmartList<Variant> variants) {
+        Assert.that(variants.size() > 0);
+        Variant targetVariant = new Variant();
+        Variant firstVariant = variants.get(0);
+
+        targetVariant.chromosome = firstVariant.chromosome;
+        targetVariant.position = firstVariant.position;
+        targetVariant.BEGs = new byte[firstVariant.BEGs.length];
+        targetVariant.REF = firstVariant.REF;
+        targetVariant.ploidy = firstVariant.ploidy;
+        targetVariant.phased = firstVariant.phased;
+
+        // 转换编码表
+        int[][] transCode = new int[variants.size()][];
+        SmartList<byte[]> newALt = new SmartList<>();
+
+        for (int i = 0; i < variants.size(); i++) {
+            Variant variant = variants.get(i);
+            if (!variant.chromosome.equals(targetVariant.chromosome) || variant.position != targetVariant.position) {
+                throw new GTBComponentException("variants with different coordinates cannot be combined into a single multi-allelic variant");
+            }
+
+            if (variant.BEGs.length != targetVariant.BEGs.length) {
+                throw new GTBComponentException("variants with different sample sizes cannot be combined into a single multi-allelic variant");
+            }
+
+            if (variant.ploidy != targetVariant.ploidy) {
+                throw new GTBComponentException("variants with different ploidy cannot be combined into a single multi-allelic variant");
+            }
+
+            targetVariant.phased = targetVariant.phased || variant.phased;
+            int[] ACs = variant.getACs();
+            transCode[i] = new int[ACs.length];
+
+            out:
+            for (int j = 1; j < ACs.length; j++) {
+                if (ACs[j] > 0) {
+                    byte[] allelej = variant.getAllele(j);
+                    for (int k = 0; k < newALt.size(); k++) {
+                        if (Arrays.equals(newALt.get(k), allelej)) {
+                            transCode[i][j] = k + 1;
+                            continue out;
+                        }
+                    }
+
+                    // 没有找到，说明是新的 alt
+                    newALt.add(allelej);
+                    transCode[i][j] = (byte) (newALt.size());
+                }
+            }
+        }
+
+        // 经过检验, 开始合并位点
+        int leftGenotype;
+        int rightGenotype;
+
+        BEGEncoder encoder = BEGEncoder.getEncoder(targetVariant.phased);
+
+        if (targetVariant.phased) {
+            // phased 时
+            for (int i = 0; i < targetVariant.BEGs.length; i++) {
+                leftGenotype = -1;
+                rightGenotype = -1;
+
+                for (int j = 0; j < variants.size(); j++) {
+                    Variant variant = variants.get(j);
+
+                    if (variant.BEGs[i] != 0) {
+                        if (leftGenotype == -1 || leftGenotype == 0) {
+                            // 还没设置该基因型
+                            leftGenotype = transCode[j][BEGDecoder.decodeHaplotype(0, variant.BEGs[i])];
+                        }
+
+                        if (rightGenotype == -1 || rightGenotype == 0) {
+                            // 还没设置该基因型
+                            rightGenotype = transCode[j][BEGDecoder.decodeHaplotype(1, variant.BEGs[i])];
+                        }
+                    }
+                }
+
+                if (leftGenotype == -1 && rightGenotype == -1) {
+                    targetVariant.BEGs[i] = encoder.encodeMiss();
+                } else {
+                    targetVariant.BEGs[i] = encoder.encode(leftGenotype, rightGenotype);
+                }
+            }
+        } else {
+            // unphased 时
+            for (int i = 0; i < targetVariant.BEGs.length; i++) {
+                leftGenotype = -1;
+                rightGenotype = -1;
+
+                for (int j = 0; j < variants.size(); j++) {
+                    Variant variant = variants.get(j);
+
+                    if (variant.BEGs[i] != 0) {
+                        if (leftGenotype == -1 || leftGenotype == 0) {
+                            // 还没设置该基因型
+                            leftGenotype = transCode[j][BEGDecoder.decodeHaplotype(0, variant.BEGs[i])];
+
+                            if (leftGenotype == 0) {
+                                leftGenotype = transCode[j][BEGDecoder.decodeHaplotype(1, variant.BEGs[i])];
+
+                                if (rightGenotype == -1) {
+                                    rightGenotype = 0;
+                                }
+                            } else {
+                                rightGenotype = transCode[j][BEGDecoder.decodeHaplotype(1, variant.BEGs[i])];
+                            }
+                        } else if (rightGenotype == 0) {
+                            // 还没设置该基因型
+                            rightGenotype = transCode[j][BEGDecoder.decodeHaplotype(0, variant.BEGs[i])];
+
+                            if (rightGenotype == 0) {
+                                rightGenotype = transCode[j][BEGDecoder.decodeHaplotype(1, variant.BEGs[i])];
+                            }
+                        }
+                    }
+                }
+
+                if (leftGenotype == -1 && rightGenotype == -1) {
+                    targetVariant.BEGs[i] = encoder.encodeMiss();
+                } else {
+                    targetVariant.BEGs[i] = encoder.encode(leftGenotype, rightGenotype);
+                }
+            }
+        }
+
+        VolumeByteStream newALTCache = new VolumeByteStream();
+        for (byte[] allele : newALt) {
+            newALTCache.writeSafety(allele);
+            newALTCache.writeSafety(ByteCode.COMMA);
+        }
+        targetVariant.ALT = newALTCache.rangeOf(0, newALTCache.size() - 1);
+        return targetVariant;
     }
 
     public Variant(int chromosomeIndex, int position, String REF, String ALT, byte[] BEGs) {
@@ -595,6 +740,236 @@ public class Variant {
     }
 
     /**
+     * 将一个多等位基因位点转为多个二等位基因位点
+     */
+    public SmartList<Variant> split() {
+        int[] ACs = getACs();
+        int[] transCodeReverse = new int[ACs.length];
+
+        int index = 0;
+        SmartList<Variant> out = new SmartList<>();
+        transCodeReverse[0] = 0;
+
+        for (int i = 1; i < ACs.length; i++) {
+            if (ACs[i] > 0) {
+                transCodeReverse[index++] = i;
+            }
+        }
+
+        if (index == 1 && transCodeReverse[0] == 0) {
+            // 只有一个有效的等位基因
+            Variant cacheVariant = new Variant();
+            cacheVariant.chromosome = this.chromosome;
+            cacheVariant.position = this.position;
+            cacheVariant.ploidy = this.ploidy;
+            cacheVariant.phased = this.phased;
+            cacheVariant.REF = ArrayUtils.copyOfRange(this.REF, 0, this.REF.length);
+            cacheVariant.BEGs = new byte[this.BEGs.length];
+            cacheVariant.ALT = new byte[]{ByteCode.PERIOD};
+            out.add(cacheVariant);
+        } else {
+            // 有多个有效等位基因时
+            BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
+            for (int i = 0; i < index; i++) {
+                Variant cacheVariant = new Variant();
+                cacheVariant.chromosome = this.chromosome;
+                cacheVariant.position = this.position;
+                cacheVariant.ploidy = this.ploidy;
+                cacheVariant.phased = this.phased;
+                cacheVariant.REF = ArrayUtils.copyOfRange(this.REF, 0, this.REF.length);
+                cacheVariant.BEGs = new byte[this.BEGs.length];
+                cacheVariant.ALT = getAllele(transCodeReverse[i]);
+
+                for (int j = 0; j < this.BEGs.length; j++) {
+                    if (this.BEGs[j] == 0) {
+                        cacheVariant.BEGs[j] = 0;
+                    } else {
+                        int leftGenotype = BEGDecoder.decodeHaplotype(0, this.BEGs[j]);
+                        int rightGenotype = BEGDecoder.decodeHaplotype(1, this.BEGs[j]);
+
+                        if (leftGenotype == transCodeReverse[i]) {
+                            leftGenotype = 1;
+                        } else {
+                            leftGenotype = 0;
+                        }
+
+                        if (rightGenotype == transCodeReverse[i]) {
+                            rightGenotype = 1;
+                        } else {
+                            rightGenotype = 0;
+                        }
+
+                        cacheVariant.BEGs[j] = encoder.encode(leftGenotype, rightGenotype);
+                    }
+                }
+
+                out.add(cacheVariant);
+            }
+        }
+
+        return out;
+    }
+
+    /**
+     * 简化 alleles，把 AC = 0 的位点删除
+     */
+    public boolean simplifyAlleles() {
+        return simplifyAlleles(false);
+    }
+
+    /**
+     * 简化 alleles，把 AC = 0 的碱基删除
+     *
+     * @param fixREF 是否允许修改 REF
+     */
+    public boolean simplifyAlleles(boolean fixREF) {
+        int[] ACs = getACs();
+        int[] transCode = new int[ACs.length];
+        int[] transCodeReverse = new int[ACs.length];
+        int index = 0;
+
+        if (fixREF) {
+            for (int i = 0; i < ACs.length; i++) {
+                if (ACs[i] > 0) {
+                    transCodeReverse[index] = i;
+                    transCode[i] = index++;
+                }
+            }
+        } else {
+            transCode[0] = index++;
+            transCodeReverse[0] = 0;
+
+            for (int i = 1; i < ACs.length; i++) {
+                if (ACs[i] > 0) {
+                    transCodeReverse[index] = i;
+                    transCode[i] = index++;
+                }
+            }
+        }
+
+        if ((index == 0) || (index == 1 && transCodeReverse[0] == 0)) {
+            // 所有的 allele 都是无效的, 此时保持 REF
+            this.ALT = new byte[]{ByteCode.PERIOD};
+            return true;
+        }
+
+        if (index < ACs.length) {
+            // 有效等位基因个数比实际少, 此时才触发精简
+            boolean fastMode = true;
+            for (int i = 0; i < index; i++) {
+                if (transCodeReverse[i] != i) {
+                    fastMode = false;
+                    break;
+                }
+            }
+
+            if (fastMode) {
+                int end = ArrayUtils.indexOf(this.ALT, ByteCode.COMMA, index - 1);
+                this.ALT = ArrayUtils.copyOfRange(this.ALT, 0, end == -1 ? this.ALT.length : end);
+            } else {
+                // 必要进行基因型转换
+                if (index == 1 && fixREF) {
+                    this.REF = getAllele(transCodeReverse[0]);
+                    this.ALT = new byte[]{ByteCode.PERIOD};
+                } else {
+                    VolumeByteStream newALT = new VolumeByteStream(this.ALT.length);
+                    for (int i = 1; i < index; i++) {
+                        newALT.write(getAllele(transCodeReverse[i]));
+                        newALT.write(ByteCode.COMMA);
+                    }
+
+                    this.REF = getAllele(transCode[0]);
+                    this.ALT = newALT.rangeOf(0, newALT.size() - 1);
+                }
+
+                // 基因型转换
+                BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
+                for (int i = 0; i < this.BEGs.length; i++) {
+                    this.BEGs[i] = this.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, this.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, this.BEGs[i])]);
+                }
+
+            }
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * 获取第 i 个等位基因
+     */
+    public byte[] getAllele(int index) {
+        if (index == 0) {
+            return this.REF;
+        } else if (index == 1) {
+            int pointer = ArrayUtils.indexOf(this.ALT, ByteCode.COMMA);
+            if (pointer == -1) {
+                return this.ALT;
+            } else {
+                return ArrayUtils.copyOfRange(this.ALT, 0, pointer);
+            }
+        } else {
+            int pointerStart = ArrayUtils.indexOfN(this.ALT, ByteCode.COMMA, 0, index - 1);
+            int pointerEnd = ArrayUtils.indexOfN(this.ALT, ByteCode.COMMA, pointerStart + 1, 1);
+
+            if (pointerStart == -1) {
+                return null;
+            }
+
+            if (pointerEnd == -1) {
+                return ArrayUtils.copyOfRange(this.ALT, pointerStart + 1, this.ALT.length);
+            }
+
+            return ArrayUtils.copyOfRange(this.ALT, pointerStart + 1, pointerEnd);
+        }
+    }
+
+    /**
+     * 获取第 i 个等位基因的索引
+     */
+    public int getAlleleIndex(byte[] allele) {
+        if (Arrays.equals(allele, this.REF)) {
+            return 0;
+        } else {
+            // 是否包含逗号
+            boolean containComma = ArrayUtils.contain(this.ALT, ByteCode.COMMA);
+
+            if (containComma) {
+                int start = 0;
+                int end;
+                int index = 1;
+                while (true) {
+                    end = ArrayUtils.indexOf(this.ALT, ByteCode.COMMA, start);
+                    if (end != -1) {
+                        if (ArrayUtils.equal(this.ALT, start, end, allele, 0, allele.length)) {
+                            return index;
+                        }
+
+                        start = end + 1;
+                        if (start < this.ALT.length) {
+                            index++;
+                        } else {
+                            return -1;
+                        }
+                    } else {
+                        // end == -1
+                        if (ArrayUtils.equal(this.ALT, start, this.ALT.length, allele, 0, allele.length)) {
+                            return index;
+                        }
+                        return -1;
+                    }
+                }
+            } else {
+                if (Arrays.equals(this.ALT, allele)) {
+                    return 1;
+                } else {
+                    return -1;
+                }
+            }
+        }
+    }
+
+    /**
      * 转为任意格式
      *
      * @param variantFormatter 序列格式转换器
@@ -623,7 +998,7 @@ public class Variant {
     }
 
     @Override
-    public Variant clone() throws CloneNotSupportedException {
+    public Variant clone() {
         return new Variant(this);
     }
 
@@ -653,7 +1028,7 @@ public class Variant {
     public String toString() {
         if (chromosome == null || REF == null || ALT == null) {
             return "Variant{empty}";
-        } else{
+        } else {
             return "Variant{" +
                     "chromosome='" + chromosome + '\'' +
                     ", position=" + position +

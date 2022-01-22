@@ -5,6 +5,8 @@ import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.easytools.FileUtils;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.build.RebuildTask;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleFreqTestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -101,6 +103,21 @@ enum RebuildFunction {
                 task.retain((HashMap<Integer, int[]>) options.get("--delete"));
             }
 
+            if (options.isPassedIn("--align")) {
+                task.alignWith((String) options.get("--align"));
+
+                if (options.isPassedIn("--check-allele")) {
+                    if (options.isPassedIn("--freq-gap")) {
+                        task.setAlleleChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap")));
+                    } else if (options.isPassedIn("--p-value")) {
+                        task.setAlleleChecker(new Chi2TestChecker((double) options.get("--p-value")));
+                    } else {
+                        task.setAlleleChecker(true);
+                    }
+                }
+            }
+            task.setSiteMergeType((String) (options.get("--method")));
+            
             // 输出日志
             System.out.println("INFO    Start running " + task);
             long jobStart = System.currentTimeMillis();

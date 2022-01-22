@@ -1,5 +1,6 @@
 package edu.sysu.pmglab.suranyi.gbc.setup.command;
 
+import edu.sysu.pmglab.suranyi.check.Assert;
 import edu.sysu.pmglab.suranyi.commandParser.CommandMatcher;
 import edu.sysu.pmglab.suranyi.commandParser.CommandParser;
 import edu.sysu.pmglab.suranyi.commandParser.converter.array.StringArrayConverter;
@@ -31,6 +32,7 @@ import java.util.HashMap;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
 import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.AT_MOST_ONE;
+import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.PRECONDITION;
 
 enum RebuildParser {
     /**
@@ -160,36 +162,47 @@ enum RebuildParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
-
         parser.register("--align")
-                .addOptions(DEBUG)
-                .arity(0)
-                .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand (Order GTB required)")
-                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+                .arity(1)
+                .convertTo(new StringConverter())
+                .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
+                .setOptionGroup("Alignment Coordinates")
+                .setDescription("Filter coordinates and adjust reference base pairs according to the specified GTB file.")
+                .setFormat("'--align <file>'");
         parser.register("--check-allele")
-                .addOptions(DEBUG)
                 .arity(0)
                 .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setOptionGroup("Alignment Coordinates")
                 .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
         parser.register("--p-value")
-                .addOptions(DEBUG)
                 .arity(1)
                 .convertTo(new DoubleConverter())
                 .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
                 .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setOptionGroup("Alignment Coordinates")
                 .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
-                .setFormat("--p-value <float, 0.000001~0.5>");
+                .setFormat("'--p-value <float, 0.000001~0.5>'");
         parser.register("--freq-gap")
-                .addOptions(DEBUG)
                 .arity(1)
                 .convertTo(new DoubleConverter())
                 .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Check Complementary Strand (Order GTB required)")
+                .setOptionGroup("Alignment Coordinates")
                 .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
-                .setFormat("--freq-gap <float, 0.000001~0.5>");
+                .setFormat("'--freq-gap <float, 0.000001~0.5>'");
+        parser.register("--method", "-m")
+                .arity(1)
+                .convertTo(params -> {
+                    Assert.that(params.length == 1);
+
+                    ElementValidator validator = new ElementValidator("union", "intersection");
+                    validator.setAllowIndex(false);
+                    validator.validate("--method", params[0]);
+                    return params[0].toLowerCase();
+                })
+                .defaultTo("intersection")
+                .setOptionGroup("Alignment Coordinates")
+                .setDescription("Method for handing coordinates in different files (union or intersection).")
+                .setFormat("'-m [union/intersection]'");
 
         parser.register("--subject", "-s")
                 .arity(1)
@@ -304,5 +317,9 @@ enum RebuildParser {
         parser.registerRule("--compressor", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--level", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--delete", "--retain", AT_MOST_ONE);
+        parser.registerRule("--align", "--check-allele", PRECONDITION);
+        parser.registerRule("--p-value", "--freq-gap", AT_MOST_ONE);
+        parser.registerRule("--check-allele", "--freq-gap", PRECONDITION);
+        parser.registerRule("--check-allele", "--p-value", PRECONDITION);
     }
 }

@@ -468,7 +468,7 @@ public class ExtractTask implements ITask {
     }
 
     /**
-     * 按照节点索引解压指定的染色体数据
+     * 按照指定位置解压
      * @param chromosomeIndex 染色体编号
      * @param positions 待解压的位置数据
      */
@@ -479,7 +479,7 @@ public class ExtractTask implements ITask {
     }
 
     /**
-     * 按照节点索引解压指定的染色体数据
+     * 按照指定位置解压
      * @param chromosome 染色体编号
      * @param positions 待解压的位置数据
      */
@@ -488,7 +488,7 @@ public class ExtractTask implements ITask {
     }
 
     /**
-     * 按照节点索引解压指定的染色体数据
+     * 按照指定位置解压
      * @param chromosomePositions 染色体-位置数据对
      */
     public <ChromosomeType> void decompressByPosition(Map<ChromosomeType, int[]> chromosomePositions) throws IOException {

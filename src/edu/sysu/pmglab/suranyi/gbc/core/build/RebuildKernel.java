@@ -136,7 +136,7 @@ class RebuildKernel {
         this.alleleQC = task.getAlleleQC();
 
         // 设定管理器
-        this.manager = task.getManager();
+        this.manager = task.getInputFile();
 
         // 获取解压数据预估大小的相关信息
         this.maxOriginMBEGsSize = this.manager.getMaxDecompressedMBEGsSize();

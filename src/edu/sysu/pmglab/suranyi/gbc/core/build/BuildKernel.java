@@ -264,12 +264,12 @@ class BuildKernel {
 
                             // 识别对应的染色体类型及编号
                             Chromosome chromosome;
-                            int ind = localLineCache.indexOf(ByteCode.TAB);
+                            int ind = localLineCache.indexOf(ByteCode.TAB) + 1;
                             if (localLineCache.startWith(ByteCode.CHR_STRING)) {
                                 // 从支持的染色体列表中获取数据
-                                chromosome = ChromosomeInfo.get(localLineCache, 3, ind - 3);
+                                chromosome = ChromosomeInfo.get(localLineCache, 3, ind - 4);
                             } else {
-                                chromosome = ChromosomeInfo.get(localLineCache, 0, ind);
+                                chromosome = ChromosomeInfo.get(localLineCache, 0, ind - 1);
                             }
                             chromosomeInfo = localLineCache.cacheOf(0, ind);
 

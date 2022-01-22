@@ -2,6 +2,7 @@ package edu.sysu.pmglab.suranyi.gbc.core.build;
 
 import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
+import edu.sysu.pmglab.suranyi.easytools.FileUtils;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleQC;
@@ -19,13 +20,13 @@ import java.util.HashSet;
 
 /**
  * @author suranyi
- * @description
+ * @description 坐标、碱基对齐
  */
 
 class AlignedKernel {
     final VariantQC variantQC;
     final AlleleQC alleleQC;
-    final AlignedTask task;
+    final RebuildTask task;
     final AlleleChecker alleleChecker;
     final HashSet<String>[] loadInChromosomes;
 
@@ -43,7 +44,7 @@ class AlignedKernel {
         complementaryBase.put(G, C);
     }
 
-    AlignedKernel(AlignedTask task) throws IOException {
+    AlignedKernel(RebuildTask task) throws IOException {
         this.task = task;
         this.alleleChecker = this.task.getAlleleChecker();
 
@@ -62,7 +63,7 @@ class AlignedKernel {
         }
     }
 
-    public static void submit(AlignedTask task) throws IOException {
+    public static void submit(RebuildTask task) throws IOException {
         new AlignedKernel(task);
     }
 
@@ -71,12 +72,12 @@ class AlignedKernel {
         HashSet<String>[] loadInChromosomes = new HashSet[2];
 
         loadInChromosomes[0] = new HashSet<>();
-        for (int chromosome : this.task.templateFile.getChromosomeList()) {
+        for (int chromosome : this.task.getTemplateFile().getChromosomeList()) {
             loadInChromosomes[0].add(ChromosomeInfo.getString(chromosome));
         }
 
         loadInChromosomes[1] = new HashSet<>();
-        for (int chromosome : this.task.inputFile.getChromosomeList()) {
+        for (int chromosome : this.task.getInputFile().getChromosomeList()) {
             loadInChromosomes[1].add(ChromosomeInfo.getString(chromosome));
         }
 
@@ -137,9 +138,12 @@ class AlignedKernel {
 
     void startWithAlleleCheck() throws IOException {
         // 校正等位基因
-        GTBReader reader1 = new GTBReader(this.task.templateFile);
-        GTBReader reader2 = new GTBReader(this.task.inputFile);
-        GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName());
+        GTBReader reader1 = new GTBReader(this.task.getTemplateFile(), this.task.getTemplateFile().isPhased(), false);
+        GTBReader reader2 = new GTBReader(this.task.getInputFile());
+        if (this.task.getSubjects() != null) {
+            reader2.selectSubjects(this.task.getSubjects());
+        }
+        GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.isInplace() ? this.task.getOutputFileName() + ".~$temp" : this.task.getOutputFileName());
         writerBuilder.setPhased(this.task.isPhased());
         writerBuilder.setSubject(reader2.getAllSubjects());
         writerBuilder.setReference(reader1.getManager().getReference());
@@ -157,12 +161,6 @@ class AlignedKernel {
         SmartList<Variant> variants1Cache = new SmartList<>();
         SmartList<Variant> variants2 = null;
         SmartList<Variant> variants2Cache = new SmartList<>();
-        Variant mergeVariant = new Variant();
-        Variant mergeVariant1 = new Variant();
-        Variant mergeVariant2 = new Variant();
-        mergeVariant.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
-        mergeVariant1.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
-        mergeVariant2.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
 
         for (int i = 0; i < 1; i++) {
             variants1Cache.add(new Variant());
@@ -190,35 +188,12 @@ class AlignedKernel {
 
             while (condition1 || condition2) {
                 if (condition1 && !condition2) {
-                    // v1 有效位点, v2 无效位点
-                    do {
-                        for (Variant variant1 : variants1) {
-                            mergeVariant1.chromosome = variant1.chromosome;
-                            mergeVariant1.position = variant1.position;
-                            mergeVariant1.ploidy = variant1.ploidy;
-                            mergeVariant1.phased = variant1.phased;
-                            mergeVariant1.ALT = variant1.ALT;
-                            mergeVariant1.REF = variant1.REF;
-                            System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
-                            writeToFile(mergeVariant1, writer);
-                        }
-                        variants1Cache.add(variants1);
-                        variants1.clear();
-                        variants1 = reader1.readVariants(variants1Cache, position);
-                        condition1 = variants1 != null;
-                    } while (condition1);
+                    break;
                 } else if (!condition1) {
                     // v2 有效位点, v1 无效位点
                     do {
                         for (Variant variant2 : variants2) {
-                            mergeVariant2.chromosome = variant2.chromosome;
-                            mergeVariant2.position = variant2.position;
-                            mergeVariant2.ploidy = variant2.ploidy;
-                            mergeVariant2.phased = variant2.phased;
-                            mergeVariant2.ALT = variant2.ALT;
-                            mergeVariant2.REF = variant2.REF;
-                            System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
-                            writeToFile(mergeVariant2, writer);
+                            writeToFile(variant2, writer);
                         }
                         variants2Cache.add(variants2);
                         variants2.clear();
@@ -233,16 +208,6 @@ class AlignedKernel {
                     if (compareStatue < 0) {
                         // 写入所有的 1 位点，并移动 1 的指针
                         do {
-                            for (Variant variant1 : variants1) {
-                                mergeVariant1.chromosome = variant1.chromosome;
-                                mergeVariant1.position = variant1.position;
-                                mergeVariant1.ploidy = variant1.ploidy;
-                                mergeVariant1.phased = variant1.phased;
-                                mergeVariant1.ALT = variant1.ALT;
-                                mergeVariant1.REF = variant1.REF;
-                                System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
-                                writeToFile(mergeVariant1, writer);
-                            }
                             variants1Cache.add(variants1);
                             variants1.clear();
                             variants1 = reader1.readVariants(variants1Cache, position);
@@ -253,14 +218,7 @@ class AlignedKernel {
                         // 写入所有的 2 位点，并移动 2 的指针
                         do {
                             for (Variant variant2 : variants2) {
-                                mergeVariant2.chromosome = variant2.chromosome;
-                                mergeVariant2.position = variant2.position;
-                                mergeVariant2.ploidy = variant2.ploidy;
-                                mergeVariant2.phased = variant2.phased;
-                                mergeVariant2.ALT = variant2.ALT;
-                                mergeVariant2.REF = variant2.REF;
-                                System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
-                                writeToFile(mergeVariant2, writer);
+                                writeToFile(variant2, writer);
                             }
                             variants2Cache.add(variants2);
                             variants2.clear();
@@ -272,13 +230,12 @@ class AlignedKernel {
                         // 位点位置值一样
                         int sizeVariants1 = variants1.size();
                         int sizeVariants2 = variants2.size();
-                        // 检查 allele 时
                         if (sizeVariants1 == sizeVariants2 && sizeVariants1 == 1) {
-                            // 只有一个位点，直接合并
+                            // 只有一个位点，直接比对
                             Variant variant1 = variants1.get(0);
                             Variant variant2 = variants2.get(0);
-                            if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                writer.write(mergeVariant);
+                            if (alignVariantWithAlleleCheck(variant1, variant2) != null) {
+                                writer.write(variant2);
                             }
                         } else {
                             // 多对多 (先找一致项，不一致的再进行匹配)
@@ -292,8 +249,8 @@ class AlignedKernel {
                                     if ((Arrays.equals(variant1.REF, variant2.REF) && Arrays.equals(variant1.ALT, variant2.ALT)) ||
                                             (Arrays.equals(variant1.REF, variant2.ALT) && Arrays.equals(variant1.ALT, variant2.REF))) {
                                         // 基本逻辑: 完全一致的碱基序列的位点直接合并，并且只合并一次
-                                        if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                            writer.write(mergeVariant);
+                                        if (alignVariantWithAlleleCheck(variant1, variant2) != null) {
+                                            writer.write(variant2);
                                         }
                                         variants2.remove(variant2);
                                         variants2Cache.add(variant2);
@@ -312,30 +269,12 @@ class AlignedKernel {
                                 } else if (variants1new.size() == 0) {
                                     // 所有来自文件 1 的位点都被匹配完成，此时文件 2 直接写入
                                     for (Variant variant2 : variants2) {
-                                        mergeVariant2.chromosome = variant2.chromosome;
-                                        mergeVariant2.position = variant2.position;
-                                        mergeVariant2.ploidy = variant2.ploidy;
-                                        mergeVariant2.phased = variant2.phased;
-                                        mergeVariant2.ALT = variant2.ALT;
-                                        mergeVariant2.REF = variant2.REF;
-                                        System.arraycopy(variant2.BEGs, 0, mergeVariant2.BEGs, manager1.getSubjectNum(), variant2.BEGs.length);
-                                        writeToFile(mergeVariant2, writer);
+                                        writeToFile(variant2, writer);
                                     }
 
                                     break;
                                 } else if (variants2.size() == 0) {
                                     // 所有来自文件 2 的位点都被匹配完成，此时文件 1 直接写入
-                                    for (Variant variant1 : variants1new) {
-                                        mergeVariant1.chromosome = variant1.chromosome;
-                                        mergeVariant1.position = variant1.position;
-                                        mergeVariant1.ploidy = variant1.ploidy;
-                                        mergeVariant1.phased = variant1.phased;
-                                        mergeVariant1.ALT = variant1.ALT;
-                                        mergeVariant1.REF = variant1.REF;
-                                        System.arraycopy(variant1.BEGs, 0, mergeVariant1.BEGs, 0, variant1.BEGs.length);
-                                        writeToFile(mergeVariant1, writer);
-                                    }
-
                                     break;
                                 } else {
                                     // 文件 1 和文件 2 都有位点，此时按照顺序匹配
@@ -344,8 +283,8 @@ class AlignedKernel {
                                         Variant variant1 = variants1new.get(i);
                                         if (variants2.size() > 0) {
                                             Variant variant2 = variants2.popFirst();
-                                            if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                                writer.write(mergeVariant);
+                                            if (alignVariantWithAlleleCheck(variant1, variant2) != null) {
+                                                writer.write(variant2);
                                             }
                                             variants2Cache.add(variant2);
                                             continue;
@@ -379,13 +318,19 @@ class AlignedKernel {
         reader1.close();
         reader2.close();
         writer.close();
+
+        if (this.task.isInplace()) {
+            FileUtils.rename(writerBuilder.getOutputFileName(), this.task.getOutputFileName());
+        }
     }
 
     void startWithoutAlleleCheck() throws IOException {
-        // 校正等位基因
-        GTBReader reader1 = new GTBReader(this.task.templateFile, this.task.templateFile.isPhased(), false);
-        GTBReader reader2 = new GTBReader(this.task.inputFile);
-        GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName());
+        GTBReader reader1 = new GTBReader(this.task.getTemplateFile(), this.task.getTemplateFile().isPhased(), false);
+        GTBReader reader2 = new GTBReader(this.task.getInputFile());
+        if (this.task.getSubjects() != null) {
+            reader2.selectSubjects(this.task.getSubjects());
+        }
+        GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.isInplace() ? this.task.getOutputFileName() + ".~$temp" : this.task.getOutputFileName());
         writerBuilder.setPhased(this.task.isPhased());
         writerBuilder.setSubject(reader2.getAllSubjects());
         writerBuilder.setReference(reader1.getManager().getReference());
@@ -403,7 +348,6 @@ class AlignedKernel {
         SmartList<Variant> variants1Cache = new SmartList<>();
         SmartList<Variant> variants2 = null;
         SmartList<Variant> variants2Cache = new SmartList<>();
-        ;
 
         for (int i = 0; i < 1; i++) {
             variants1Cache.add(new Variant());
@@ -477,7 +421,7 @@ class AlignedKernel {
 
                         // 不检查 allele 时, 逐一配对
                         if (sizeVariants1 == sizeVariants2 && sizeVariants1 == 1) {
-                            // 只有一个位点，直接合并
+                            // 只有一个位点，直接比对
                             Variant variant1 = variants1.get(0);
                             Variant variant2 = variants2.get(0);
                             variant2.resetAlleles(variant1.REF, variant1.ALT);
@@ -529,6 +473,7 @@ class AlignedKernel {
                                         Variant variant1 = variants1new.get(i);
                                         if (variants2.size() > 0) {
                                             Variant variant2 = variants2.popFirst();
+                                            variant2.resetAlleles(variant1.REF, variant1.ALT);
                                             writeToFile(variant2, writer);
                                             variants2Cache.add(variant2);
                                             continue;
@@ -562,9 +507,13 @@ class AlignedKernel {
         reader1.close();
         reader2.close();
         writer.close();
+
+        if (this.task.isInplace()) {
+            FileUtils.rename(writerBuilder.getOutputFileName(), this.task.getOutputFileName());
+        }
     }
 
-    Variant mergeVariantWithAlleleCheck(Variant variant1, Variant variant2, Variant target) {
+    Variant alignVariantWithAlleleCheck(Variant variant1, Variant variant2) {
         int AC12 = variant1.getAC();
         int AN1 = variant1.getAN();
         int AC11 = AN1 - AC12;
@@ -574,7 +523,7 @@ class AlignedKernel {
         int alleleNum1 = variant1.getAlternativeAlleleNum();
         int alleleNum2 = variant2.getAlternativeAlleleNum();
         int AC = -1;
-        int AN = AN1 + AN2;
+        int AN = AN2;
 
         if (AC22 == 0 && AC12 == 0) {
             // alt 都是 . 并且他们没有频率值
@@ -641,34 +590,31 @@ class AlignedKernel {
                 if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
                     variant2.REF = variant1.ALT;
                     variant2.ALT = variant1.REF;
-                    AC = AC12 + AC21;
+                    AC = AC21;
                 } else {
                     variant2.ALT = variant1.ALT;
-                    AC = AC12;
+                    AC = AC22;
                 }
             } else if (Arrays.equals(variant2.REF, variant1.ALT)) {
                 if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                     variant2.REF = variant1.REF;
                     variant2.ALT = variant1.ALT;
-                    AC = AC12;
+                    AC = AC22;
                 } else {
                     variant2.ALT = variant1.REF;
-                    AC = AC12 + AC21;
+                    AC = AC21;
                 }
             } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                 variant2.REF = variant1.REF;
                 variant2.ALT = variant1.ALT;
-                AC = AC12;
+                AC = AC22;
             } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
                 variant2.REF = variant1.ALT;
                 variant2.ALT = variant1.REF;
-                AC = AC12 + AC21;
+                AC = AC21;
             } else {
                 variant2.ALT = variant1.REF;
-
-                if (alleleNum1 == 2) {
-                    AC = AC12 + AC21;
-                }
+                AC = AC22;
             }
         } else {
             // 都不为 .
@@ -680,16 +626,16 @@ class AlignedKernel {
                     if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = variant1.ALT;
-                        AC = AC12 + AC22;
+                        AC = AC22;
                     }
                 } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
                     if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
                         variant2.REF = variant1.ALT;
                         variant2.ALT = variant1.REF;
-                        AC = AC12 + AC21;
+                        AC = AC21;
                     }
                 } else if (Arrays.equals(variant1.REF, variant2.REF)) {
-                    AC = AC12 + AC22;
+                    AC = AC22;
                 }
             } else if (alleleNum1 == 2) {
                 byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
@@ -697,7 +643,7 @@ class AlignedKernel {
                     if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
-                        AC = AC12 + AC22;
+                        AC = AC22;
                     }
                 } else if (Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
                     if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
@@ -705,7 +651,7 @@ class AlignedKernel {
                         variant2.ALT = getInverseAllele(variant2.ALT);
                     }
                 } else if (Arrays.equals(variant1.REF, variant2.REF)) {
-                    AC = AC12 + AC22;
+                    AC = AC22;
                 }
             } else if (alleleNum2 == 2) {
                 byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
@@ -713,7 +659,7 @@ class AlignedKernel {
                     if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
-                        AC = AC12 + AC22;
+                        AC = AC22;
                     }
                 } else if (Arrays.equals(variant2.ALT, inverseAlleleVariant1REF)) {
                     if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
@@ -721,7 +667,7 @@ class AlignedKernel {
                         variant2.REF = getInverseAllele(variant2.REF);
                     }
                 } else if (Arrays.equals(variant1.REF, variant2.REF)) {
-                    AC = AC12 + AC22;
+                    AC = AC22;
                 }
             } else {
                 // 都是多等位基因位点，只检查 ref
@@ -729,18 +675,18 @@ class AlignedKernel {
                     if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
-                        AC = AC12 + AC22;
+                        AC = AC22;
                     }
                 } else if (Arrays.equals(variant1.REF, variant2.REF)) {
-                    AC = AC12 + AC22;
+                    AC = AC22;
                 }
             }
         }
 
         // 合并位点到 target
-        variant1.merge(variant2, target);
+        variant2.resetAlleles(variant1.REF, variant1.ALT);
 
-        if (this.variantQC.filter(null, target.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
+        if (this.variantQC.filter(null, variant2.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
             return null;
         }
 
@@ -750,17 +696,17 @@ class AlignedKernel {
                 if (this.alleleQC.filter(AC, AN)) {
                     return null;
                 } else {
-                    return target;
+                    return variant2;
                 }
             } else {
-                if (this.alleleQC.filter(target.getAC(), AN)) {
+                if (this.alleleQC.filter(variant2.getAC(), AN)) {
                     return null;
                 } else {
-                    return target;
+                    return variant2;
                 }
             }
         } else {
-            return target;
+            return variant2;
         }
     }
 

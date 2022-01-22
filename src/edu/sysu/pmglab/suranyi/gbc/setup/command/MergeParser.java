@@ -83,14 +83,14 @@ enum MergeParser {
                 .validateWith(new RangeValidator(1e-6, 0.5))
                 .setOptionGroup("Check Complementary Strand")
                 .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
-                .setFormat("--p-value <float, 0.000001~0.5>");
+                .setFormat("'--p-value <float, 0.000001~0.5>'");
         parser.register("--freq-gap")
                 .arity(1)
                 .convertTo(new DoubleConverter())
                 .validateWith(new RangeValidator(1e-6, 0.5))
                 .setOptionGroup("Check Complementary Strand")
                 .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
-                .setFormat("--freq-gap <float, 0.000001~0.5>");
+                .setFormat("'--freq-gap <float, 0.000001~0.5>'");
         parser.register("--contig")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -196,21 +196,21 @@ enum MergeParser {
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleACController.MIN, AlleleACController.MAX))
-                .setOptionGroup("Quality Control Options")
+                .setOptionGroup("Variant Selection Options")
                 .setDescription("Exclude variants with the minimal alternate allele count per variant out of the range [minAc, maxAc].")
                 .setFormat("'--seq-ac <minAc>-', '--seq-ac -<maxAc>' or '--seq-ac <minAc>-<maxAc>' (minAc and maxAc are non-negative integers)");
         parser.register("--seq-af")
                 .arity(1)
                 .convertTo(new NaturalDoubleRangeConverter())
                 .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
-                .setOptionGroup("Quality Control Options")
+                .setOptionGroup("Variant Selection Options")
                 .setDescription("Exclude variants with the minimal alternate allele frequency per variant out of the range [minAf, maxAf].")
                 .setFormat("'--seq-af <minAf>-', '--seq-af -<maxAf>' or '--seq-af <minAf>-<maxAf>' (minAf and maxAf are floating values between 0 and 1)");
         parser.register("--seq-an")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleANController.MIN, AlleleANController.MAX))
-                .setOptionGroup("Quality Control Options")
+                .setOptionGroup("Variant Selection Options")
                 .setDescription("Exclude variants with the minimum non-missing allele number per variant out of the range [minAn, maxAn].")
                 .setFormat("'--seq-an <minAn>-', '--seq-an -<maxAn>' or '--seq-an <minAn>-<maxAn>' (minAn and maxAn are non-negative integers)");
         parser.register("--max-allele")
@@ -218,7 +218,7 @@ enum MergeParser {
                 .convertTo(new IntConverter())
                 .defaultTo(VariantAllelesNumController.DEFAULT)
                 .validateWith(new RangeValidator(2, CoderConfig.MAX_ALLELE_NUM))
-                .setOptionGroup("Quality Control Options")
+                .setOptionGroup("Variant Selection Options")
                 .setDescription("Exclude variants with alleles over --max-allele.")
                 .setFormat("'--max-allele <int, 2~15>'");
 
