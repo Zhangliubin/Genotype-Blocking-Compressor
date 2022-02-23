@@ -52,8 +52,6 @@ public enum EntryPoint {
                     MD5Function.submit(args);
                 } else if (options.isPassedIn("version")) {
                     System.out.println("Version: GBC-1.1 (last edited on 2022.01.15)");
-                } else if (options.isPassedIn("workflow")) {
-                    WorkFlowFunction.submit(args);
                 } else if (options.isPassedIn("-h")) {
                     System.out.println(INSTANCE.parser);
                 }

@@ -4,9 +4,9 @@ import edu.sysu.pmglab.suranyi.check.Assert;
 import edu.sysu.pmglab.suranyi.check.ioexception.IOExceptionOptions;
 import edu.sysu.pmglab.suranyi.compressor.ICompressor;
 import edu.sysu.pmglab.suranyi.container.SmartList;
+import edu.sysu.pmglab.suranyi.easytools.FileUtils;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
-import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GBCExceptionOptions;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
@@ -15,6 +15,7 @@ import edu.sysu.pmglab.suranyi.unifyIO.FileStream;
 import edu.sysu.pmglab.suranyi.unifyIO.options.FileOptions;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -27,13 +28,6 @@ import java.util.Map;
 
 public class RebuildTask extends IBuildTask {
     private final GTBManager inputFile;
-
-    /**
-     * 对齐方法
-     */
-    private GTBManager templateFile;
-    AlleleChecker alleleChecker;
-    boolean keepAll;
 
     /**
      * 设置有关筛选数据的参数
@@ -65,112 +59,10 @@ public class RebuildTask extends IBuildTask {
     }
 
     /**
-     * 坐标、碱基对齐
-     *
-     * @param templateFile 模版文件 (例如来自 1000GP3 的文件)
-     */
-    public RebuildTask alignWith(String templateFile) throws IOException {
-        synchronized (this) {
-            if (templateFile != null) {
-                Assert.that(!templateFile.equals(this.inputFile.getFileName()), IOExceptionOptions.FileOccupiedException, "inputFile cannot be the same as templateFile");
-                this.templateFile = GTBRootCache.get(templateFile);
-            } else {
-                this.templateFile = null;
-            }
-        }
-
-        return this;
-    }
-
-    /**
-     * 保留所有位点
-     */
-    public RebuildTask setSiteMergeType(String type) {
-        synchronized (this) {
-            if (type.equalsIgnoreCase("union")) {
-                // 取并集
-                this.keepAll = true;
-            } else if (type.equalsIgnoreCase("intersection")) {
-                this.keepAll = false;
-            } else {
-                throw new IllegalArgumentException("task.setSiteMergeType only supported union or intersection");
-            }
-        }
-        return this;
-    }
-
-    public RebuildTask setKeepAll(boolean keepAll) {
-        synchronized (this) {
-            this.keepAll = keepAll;
-        }
-
-        return this;
-    }
-
-    /**
-     * 检查 allele frequency 并进行校正
-     */
-    public RebuildTask setAlleleChecker(AlleleChecker checker) {
-        synchronized (this) {
-            this.alleleChecker = checker;
-        }
-        return this;
-    }
-
-    /**
-     * 检查 allele frequency 并进行校正
-     */
-    public RebuildTask setAlleleChecker(boolean checkAf) {
-        synchronized (this) {
-            if (checkAf) {
-                this.alleleChecker = new Chi2TestChecker();
-            } else {
-                this.alleleChecker = null;
-            }
-        }
-        return this;
-    }
-
-    /**
-     * 检查 allele frequency 并进行校正
-     */
-    public RebuildTask setAlleleChecker(boolean checkAf, double alpha) {
-        synchronized (this) {
-            if (checkAf) {
-                this.alleleChecker = new Chi2TestChecker(alpha);
-            } else {
-                this.alleleChecker = null;
-            }
-        }
-        return this;
-    }
-
-    /**
-     * 获取等位基因检查器
-     */
-    public AlleleChecker getAlleleChecker() {
-        return alleleChecker;
-    }
-
-    /**
-     * 是否保留所有的位点
-     */
-    public boolean isKeepAll() {
-        return keepAll;
-    }
-
-    /**
      * 获取管理器
      */
     public GTBManager getInputFile() {
         return inputFile;
-    }
-
-    /**
-     * 获取模版文件
-     */
-    public GTBManager getTemplateFile() {
-        return templateFile;
     }
 
     /**
@@ -387,28 +279,276 @@ public class RebuildTask extends IBuildTask {
     /**
      * 运行，并发控制
      */
-    @Override
-    public void submit() throws IOException {
+    public void rebuildAll() throws IOException {
         synchronized (this) {
             if (this.outputFileName == null) {
                 this.outputFileName = autoGenerateOutputFileName();
             }
 
             // if inputFileName = outputFileName
-            this.inplace = this.inputFile.getFileName().equals(this.outputFileName) || (this.templateFile != null && this.inputFile.getFileName().equals(this.templateFile.getFileName()));
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
 
-            if (templateFile != null) {
-                // 对齐位点模式
-                Assert.that(templateFile.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot merge unordered GTBs, please use `rebuild` to sort them first");
-                Assert.that(inputFile.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot merge unordered GTBs, please use `rebuild` to sort them first");
-                AlignedKernel.submit(this);
-            } else {
-                // 构建核心任务
-                RebuildKernel.submit(this);
-            }
+            // 构建核心任务
+            RebuildKernel.rebuildAll(this);
 
             // 清除缓存数据
-            GTBRootCache.clear(this.inputFile);
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 重压缩指定的多个染色体数据
+     * @param chromosomeIndexes 重压缩的染色体
+     */
+    public void rebuildByChromosome(int... chromosomeIndexes) throws IOException {
+        synchronized (this) {
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
+
+            // 构建核心任务
+            RebuildKernel.rebuildByChromosome(this, chromosomeIndexes);
+
+            // 清除缓存数据
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 重压缩指定的多个染色体数据
+     * @param chromosomes 重压缩的染色体
+     */
+    public void rebuildByChromosome(String... chromosomes) throws IOException {
+        rebuildByChromosome(ChromosomeInfo.getIndexes(chromosomes));
+    }
+
+
+    /**
+     * 重压缩指定染色体
+     * @param chromosome 染色体编号
+     */
+    public void rebuildByRange(String chromosome) throws IOException {
+        rebuildByRange(ChromosomeInfo.getIndex(chromosome), 0);
+    }
+
+    /**
+     * 重压缩指定染色体从 minPos 开始的位点
+     * @param chromosomeIndex 染色体编号
+     * @param startPos 开始的位点
+     */
+    public void rebuildByRange(int chromosomeIndex, int startPos) throws IOException {
+        rebuildByRange(chromosomeIndex, startPos, Integer.MAX_VALUE);
+    }
+
+    /**
+     * 重压缩指定染色体从 minPos 开始的位点
+     * @param chromosome 染色体编号
+     * @param startPos 开始的位点
+     */
+    public void rebuildByRange(String chromosome, int startPos) throws IOException {
+        rebuildByRange(ChromosomeInfo.getIndex(chromosome), startPos);
+    }
+
+    /**
+     * 重压缩指定染色体从 minPos-endPos 的位点
+     * @param chromosomeIndex 染色体编号
+     * @param startPos 开始的位点
+     * @param endPos 结束的位点
+     */
+    public void rebuildByRange(int chromosomeIndex, int startPos, int endPos) throws IOException {
+        synchronized (this) {
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
+
+            // 构建核心任务
+            RebuildKernel.rebuildByRange(this, chromosomeIndex, startPos, endPos);
+
+            // 清除缓存数据
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 重压缩指定染色体从 minPos-endPos 的位点
+     * @param chromosome 染色体编号
+     * @param startPos 开始的位点
+     * @param endPos 结束的位点
+     */
+    public void rebuildByRange(String chromosome, int startPos, int endPos) throws IOException {
+        rebuildByRange(ChromosomeInfo.getIndex(chromosome), startPos, endPos);
+    }
+
+    /**
+     * 按照指定位置重压缩
+     * @param chromosomeIndex 染色体编号
+     * @param positions 待重压缩的位置数据
+     */
+    public void rebuildByPosition(int chromosomeIndex, int[] positions) throws IOException {
+        HashMap<Integer, int[]> chromosomeMap = new HashMap<>(1);
+        chromosomeMap.put(chromosomeIndex, positions);
+        rebuildByPosition(chromosomeMap);
+    }
+
+    /**
+     * 按照指定位置重压缩
+     * @param chromosome 染色体编号
+     * @param positions 待重压缩的位置数据
+     */
+    public void rebuildByPosition(String chromosome, int[] positions) throws IOException {
+        rebuildByPosition(ChromosomeInfo.getIndex(chromosome), positions);
+    }
+
+    /**
+     * 按照指定位置重压缩
+     * @param chromosomePositions 染色体-位置数据对
+     */
+    public <ChromosomeType> void rebuildByPosition(Map<ChromosomeType, int[]> chromosomePositions) throws IOException {
+        synchronized (this) {
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
+
+            // 构建核心任务
+            RebuildKernel.rebuildByPosition(this, chromosomePositions);
+
+            // 清除缓存数据
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 传入存放的位置数据文件进行重压缩
+     * @param fileName 位置数据文件
+     * @param groupRegex 不同组位置数据的分隔符
+     * @param positionRegex 染色体-位置 之间的分割符
+     */
+    public void rebuildByPositionFromFile(String fileName, String groupRegex, String positionRegex) throws IOException {
+        try (FileStream fs = new FileStream(fileName, FileOptions.CHANNEL_READER)) {
+            HashMap<Integer, ArrayList<Integer>> chromosomePositions = new HashMap<>(24);
+            String[] groups = new String(fs.readAll()).split(groupRegex);
+
+            for (String group : groups) {
+                String[] groupData = group.split(positionRegex);
+                int chromosomeIndex = ChromosomeInfo.getIndex(groupData[0]);
+
+                if (!chromosomePositions.containsKey(chromosomeIndex)) {
+                    chromosomePositions.put(chromosomeIndex, new ArrayList<>(32));
+                }
+                chromosomePositions.get(chromosomeIndex).add(Integer.valueOf(groupData[1]));
+            }
+
+            HashMap<Integer, int[]> realChromosomePositions = new HashMap<>(chromosomePositions.size());
+            for (int key : chromosomePositions.keySet()) {
+                ArrayList<Integer> value = chromosomePositions.get(key);
+                int[] cache = new int[value.size()];
+                for (int i = 0; i < cache.length; i++) {
+                    cache[i] = value.get(i);
+                }
+                realChromosomePositions.put(key, cache);
+            }
+
+            rebuildByPosition(realChromosomePositions);
+        }
+    }
+
+    /**
+     * 坐标、碱基对齐
+     *
+     * @param templateFile 模版文件 (例如来自 1000GP3 的文件)
+     */
+    public void alignWith(String templateFile, boolean keepAll, AlleleChecker checker) throws IOException {
+        synchronized (this) {
+            Assert.that(FileUtils.exists(templateFile), IOExceptionOptions.FileNotFoundException, templateFile + " not found");
+
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName) || (templateFile.equals(this.outputFileName));
+
+            // 对齐位点模式
+            GTBManager templateManager = GTBRootCache.get(templateFile);
+            Assert.that(!templateFile.equals(this.inputFile.getFileName()), IOExceptionOptions.FileOccupiedException, "inputFile cannot be the same as templateFile");
+            Assert.that(templateManager.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot align unordered GTBs, please use `rebuild` to sort them first");
+            Assert.that(inputFile.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot align unordered GTBs, please use `rebuild` to sort them first");
+
+            AlignedKernel.submit(this, templateManager, keepAll, checker);
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 坐标、碱基对齐
+     *
+     * @param templateFile 模版文件 (例如来自 1000GP3 的文件)
+     */
+    public void alignWith(String templateFile, String type, AlleleChecker checker) throws IOException {
+        boolean keepAll;
+
+        if (type.equalsIgnoreCase("union")) {
+            // 取并集
+            keepAll = true;
+        } else if (type.equalsIgnoreCase("intersection")) {
+            keepAll = false;
+        } else {
+            throw new IllegalArgumentException("task.setSiteMergeType only supported union or intersection");
+        }
+
+        alignWith(templateFile, keepAll, checker);
+    }
+
+    /**
+     * 转为二等位基因位点
+     */
+    public void convertToBiallelic() throws IOException {
+        synchronized (this) {
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
+
+            Assert.that(inputFile.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot normalize unordered GTBs, please use `rebuild` to sort them first");
+
+            // 构建核心任务
+            NormKernel.submit(this, false);
+
+            // 清除缓存数据
+            GTBRootCache.clear(this.outputFileName);
+        }
+    }
+
+    /**
+     * 转为多等位基因位点
+     */
+    public void convertToMultiallelic() throws IOException {
+        synchronized (this) {
+            if (this.outputFileName == null) {
+                this.outputFileName = autoGenerateOutputFileName();
+            }
+
+            // if inputFileName = outputFileName
+            this.inplace = this.inputFile.getFileName().equals(this.outputFileName);
+
+            Assert.that(inputFile.isOrderedGTB(), GBCExceptionOptions.GTBComponentException, "GBC cannot normalize unordered GTBs, please use `rebuild` to sort them first");
+
+            // 构建核心任务
+            NormKernel.submit(this, true);
+
+            // 清除缓存数据
+            GTBRootCache.clear(this.outputFileName);
         }
     }
 
@@ -426,7 +566,6 @@ public class RebuildTask extends IBuildTask {
 
         return "RebuildTask {" +
                 "\n\tinputFile: " + this.inputFile.getFileName() +
-                (templateFile == null ? "" : "\n\ttemplateFile: " + this.templateFile.getFileName()) +
                 "\n\toutputFile: " + this.outputFileName +
                 "\n\tthreads: " + this.threads +
                 "\n\tphased: " + this.phased +
@@ -434,8 +573,6 @@ public class RebuildTask extends IBuildTask {
                 "\n\treordering: " + this.reordering + (this.reordering ? " (" + this.windowSize + " - Accumulated Generating Sequence)" : "") +
                 "\n\tblockSize: " + this.blockSize + " (-bs " + this.blockSizeType + ")" +
                 "\n\tcompressionLevel: " + this.compressionLevel + " (" + ICompressor.getCompressorName(this.getCompressor()) + ")" +
-                (templateFile == null ? "" : "\n\tsite selection: " + (this.keepAll ? "union" : "intersection") +
-                        "\n\tcheck allele: " + (this.alleleChecker == null ? "false" : this.alleleChecker)) +
                 (this.variantQC.size() == 0 ? "" : "\n\tvariantQC: " + this.variantQC) +
                 (this.alleleQC.size() == 0 ? "" : "\n\talleleQC: " + this.alleleQC) +
                 "\n}";

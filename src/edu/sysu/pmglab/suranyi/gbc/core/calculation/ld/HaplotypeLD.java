@@ -10,7 +10,7 @@ import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
  * @author suranyi
  */
 
-enum HaplotypeLD implements ILDModel {
+enum HaplotypeLD implements ILDModel, ILDContext {
     /**
      * 单倍型 LD 模型: 分为 D' 法和 r^2 法
      * 该模型会考虑基因型的向型，unphased 和 phased 的文件分析结果不一致
@@ -20,7 +20,7 @@ enum HaplotypeLD implements ILDModel {
     static String EXTENSION = ".hap.ld";
 
     @Override
-    public int calculateLD(VolumeByteStream lineCache, Variant variant1, Variant variant2, double minR2) {
+    public int calculateLDR2(VolumeByteStream lineCache, Variant variant1, Variant variant2, double minR2) {
         VariantProperty propertyA = (VariantProperty) variant1.property;
         VariantProperty propertyB = (VariantProperty) variant2.property;
         int validAlleleNum;
@@ -91,6 +91,156 @@ enum HaplotypeLD implements ILDModel {
         lineCache.reset();
         formatterOut(lineCache, variant1.chromosome, variant1.position, variant2.position, validAlleleNum >> (2 - variant1.ploidy), D, Dprime, r2);
         return lineCache.size();
+    }
+
+    @Override
+    public double calculateLDR2(Variant variant1, Variant variant2) {
+        if (!(variant1.property instanceof VariantProperty)) {
+            variant1.property = getProperty(variant1.BEGs.length).fillBitCodes(variant1);
+        }
+
+        if (!(variant2.property instanceof VariantProperty)) {
+            variant2.property = getProperty(variant2.BEGs.length).fillBitCodes(variant2);
+        }
+
+        VariantProperty propertyA = (VariantProperty) variant1.property;
+        VariantProperty propertyB = (VariantProperty) variant2.property;
+        int validAlleleNum;
+
+        float PA_ALT;
+        float PA_REF;
+        float PB_ALT;
+        float PB_REF;
+        float PAB_ALT;
+
+        if (propertyA.hasMiss || propertyB.hasMiss) {
+            // 至少有一个位点包含 miss 基因型时，需要重新计算
+            int countAB_ALT = 0;
+            validAlleleNum = 0;
+            int countA_ALT = 0;
+            int countB_ALT = 0;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                // 有效等位基因状态及个数
+                int validAlleleStatus = (propertyA.validAlleleFlags[i] & propertyB.validAlleleFlags[i]);
+                int currentValidAlleleNum = Integer.bitCount(validAlleleStatus);
+
+                if (currentValidAlleleNum > 0) {
+                    // 不全是缺失
+                    countA_ALT += Integer.bitCount(propertyA.bitCodes[i] & validAlleleStatus);
+                    countB_ALT += Integer.bitCount(propertyB.bitCodes[i] & validAlleleStatus);
+                    countAB_ALT += Integer.bitCount(propertyA.bitCodes[i] & propertyB.bitCodes[i]);
+                    validAlleleNum += currentValidAlleleNum;
+                }
+            }
+
+            if (validAlleleNum == 0 || countA_ALT == 0 || countB_ALT == 0) {
+                return Double.NaN;
+            }
+
+            PA_ALT = (float) countA_ALT / validAlleleNum;
+            PB_ALT = (float) countB_ALT / validAlleleNum;
+            PA_REF = 1 - PA_ALT;
+            PB_REF = 1 - PB_ALT;
+            PAB_ALT = (float) countAB_ALT / validAlleleNum;
+        } else {
+            // 没有任何缺失，此时借助缓冲数据提升速度
+            validAlleleNum = variant1.BEGs.length << 1;
+
+            int countAB_ALT = 0;
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                countAB_ALT += Integer.bitCount(propertyA.bitCodes[i] & propertyB.bitCodes[i]);
+            }
+            PA_ALT = propertyA.P_ALT;
+            PA_REF = propertyA.P_REF;
+            PB_ALT = propertyB.P_ALT;
+            PB_REF = propertyB.P_REF;
+            PAB_ALT = (float) countAB_ALT / validAlleleNum;
+        }
+
+        if (validAlleleNum == 0 || PA_ALT == 0 || PB_ALT == 0 || PA_REF == 0 || PB_REF == 0) {
+            return Double.NaN;
+        }
+
+
+        float D = (PAB_ALT - PA_ALT * PB_ALT);
+        float r2 = D * D / (PA_ALT * PB_ALT * PA_REF * PB_REF);
+
+        return r2;
+    }
+
+    @Override
+    public double calculateLD(Variant variant1, Variant variant2) {
+        if (!(variant1.property instanceof VariantProperty)) {
+            variant1.property = getProperty(variant1.BEGs.length).fillBitCodes(variant1);
+        }
+
+        if (!(variant2.property instanceof VariantProperty)) {
+            variant2.property = getProperty(variant2.BEGs.length).fillBitCodes(variant2);
+        }
+
+        VariantProperty propertyA = (VariantProperty) variant1.property;
+        VariantProperty propertyB = (VariantProperty) variant2.property;
+        int validAlleleNum;
+
+        float PA_ALT;
+        float PA_REF;
+        float PB_ALT;
+        float PB_REF;
+        float PAB_ALT;
+
+        if (propertyA.hasMiss || propertyB.hasMiss) {
+            // 至少有一个位点包含 miss 基因型时，需要重新计算
+            int countAB_ALT = 0;
+            validAlleleNum = 0;
+            int countA_ALT = 0;
+            int countB_ALT = 0;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                // 有效等位基因状态及个数
+                int validAlleleStatus = (propertyA.validAlleleFlags[i] & propertyB.validAlleleFlags[i]);
+                int currentValidAlleleNum = Integer.bitCount(validAlleleStatus);
+
+                if (currentValidAlleleNum > 0) {
+                    // 不全是缺失
+                    countA_ALT += Integer.bitCount(propertyA.bitCodes[i] & validAlleleStatus);
+                    countB_ALT += Integer.bitCount(propertyB.bitCodes[i] & validAlleleStatus);
+                    countAB_ALT += Integer.bitCount(propertyA.bitCodes[i] & propertyB.bitCodes[i]);
+                    validAlleleNum += currentValidAlleleNum;
+                }
+            }
+
+            if (validAlleleNum == 0 || countA_ALT == 0 || countB_ALT == 0) {
+                return Double.NaN;
+            }
+
+            PA_ALT = (float) countA_ALT / validAlleleNum;
+            PB_ALT = (float) countB_ALT / validAlleleNum;
+            PA_REF = 1 - PA_ALT;
+            PB_REF = 1 - PB_ALT;
+            PAB_ALT = (float) countAB_ALT / validAlleleNum;
+        } else {
+            // 没有任何缺失，此时借助缓冲数据提升速度
+            validAlleleNum = variant1.BEGs.length << 1;
+
+            int countAB_ALT = 0;
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                countAB_ALT += Integer.bitCount(propertyA.bitCodes[i] & propertyB.bitCodes[i]);
+            }
+            PA_ALT = propertyA.P_ALT;
+            PA_REF = propertyA.P_REF;
+            PB_ALT = propertyB.P_ALT;
+            PB_REF = propertyB.P_REF;
+            PAB_ALT = (float) countAB_ALT / validAlleleNum;
+        }
+
+        if (validAlleleNum == 0 || PA_ALT == 0 || PB_ALT == 0 || PA_REF == 0 || PB_REF == 0) {
+            return Double.NaN;
+        }
+
+
+        float D = (PAB_ALT - PA_ALT * PB_ALT);
+        return D / Math.sqrt(PA_ALT * PB_ALT * PA_REF * PB_REF);
     }
 
     @Override

@@ -10,7 +10,7 @@ import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
  * @author suranyi
  */
 
-enum GenotypeLD implements ILDModel {
+enum GenotypeLD implements ILDModel, ILDContext {
     /**
      * Pearson LD 模型
      * 该模型不考虑基因型向型，仅考虑基因型携带等位基因的个数
@@ -20,7 +20,7 @@ enum GenotypeLD implements ILDModel {
     static String EXTENSION = ".geno.ld";
 
     @Override
-    public int calculateLD(VolumeByteStream lineCache, Variant variant1, Variant variant2, double minR2) {
+    public int calculateLDR2(VolumeByteStream lineCache, Variant variant1, Variant variant2, double minR2) {
         VariantProperty propertyA = (VariantProperty) variant1.property;
         VariantProperty propertyB = (VariantProperty) variant2.property;
 
@@ -80,6 +80,10 @@ enum GenotypeLD implements ILDModel {
             sumA_square = countA_N_ALLELE_NUM_EQ_1 + (countA_N_ALLELE_NUM_EQ_2 << 2);
             sumB_square = countB_N_ALLELE_NUM_EQ_1 + (countB_N_ALLELE_NUM_EQ_2 << 2);
 
+            if (validSampleNum == 0) {
+                // 全是缺失的, 此时认为两位点的 LD 系数为 Nan (因为无法判断)
+                return 0;
+            }
         } else {
             // 没有任何缺失，此时借助缓冲数据提升速度
             validSampleNum = variant1.BEGs.length;
@@ -101,10 +105,6 @@ enum GenotypeLD implements ILDModel {
             sumB_square = propertyB.N_ALLELE_I_SQUARE;
         }
 
-        if (validSampleNum == 0) {
-            return 0;
-        }
-
         // 分子和分母
         double r_numerator = sumAB - (double) sumA * sumB / validSampleNum;
         double r_denominator_square = (sumA_square - (double) sumA * sumA / validSampleNum) * (sumB_square - (double) sumB * sumB / validSampleNum);
@@ -122,6 +122,232 @@ enum GenotypeLD implements ILDModel {
         lineCache.reset();
         formatterOut(lineCache, variant1.chromosome, variant1.position, variant2.position, validSampleNum, (float) r2);
         return lineCache.size();
+    }
+
+    @Override
+    public double calculateLDR2(Variant variant1, Variant variant2) {
+        if (variant1.BEGs.length != variant2.BEGs.length) {
+            throw new UnsupportedOperationException("LD coefficients are calculated between sites with different sample sizes");
+        }
+
+        if (variant1.getAlternativeAlleleNum() > 2 || variant2.getAlternativeAlleleNum() > 2) {
+            throw new UnsupportedOperationException("LD coefficients are calculated between sites with number of alternative allele > 2");
+        }
+
+        if (!(variant1.property instanceof VariantProperty)) {
+            variant1.property = getProperty(variant1.BEGs.length).fillBitCodes(variant1);
+        }
+
+        if (!(variant2.property instanceof VariantProperty)) {
+            variant2.property = getProperty(variant2.BEGs.length).fillBitCodes(variant2);
+        }
+
+        VariantProperty propertyA = (VariantProperty) variant1.property;
+        VariantProperty propertyB = (VariantProperty) variant2.property;
+
+        int validSampleNum;
+        int sumA;
+        int sumB;
+        int sumAB;
+        int sumA_square;
+        int sumB_square;
+
+        if (propertyA.hasMiss || propertyB.hasMiss) {
+            // 至少有一个位点包含 miss 基因型时，需要重新计算
+            validSampleNum = 0;
+            int countA_N_ALLELE_NUM_EQ_1 = 0;
+            int countA_N_ALLELE_NUM_EQ_2 = 0;
+            int countB_N_ALLELE_NUM_EQ_1 = 0;
+            int countB_N_ALLELE_NUM_EQ_2 = 0;
+            int countAB_ALLELE_NUM_EQ_1_1 = 0;
+            int countAB_ALLELE_NUM_EQ_1_2 = 0;
+            int countAB_ALLELE_NUM_EQ_2_2 = 0;
+            int countA_N_ALLELE_NUM_EQ_1_status;
+            int countA_N_ALLELE_NUM_EQ_2_status;
+            int countB_N_ALLELE_NUM_EQ_1_status;
+            int countB_N_ALLELE_NUM_EQ_2_status;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                // 有效等位基因状态及个数
+                int validSampleStatus = (propertyA.validSampleFlags[i] & propertyB.validSampleFlags[i]);
+                int currentValidSampleNum = Integer.bitCount(validSampleStatus);
+
+                if (currentValidSampleNum > 0) {
+                    // 不全是缺失，获取相交等位基因
+                    validSampleNum += currentValidSampleNum;
+
+                    // 获得等位基因个数为 1 的位信息
+                    countA_N_ALLELE_NUM_EQ_1_status = propertyA.N_ALLELE_NUM_EQ_1[i] & validSampleStatus;
+                    countB_N_ALLELE_NUM_EQ_1_status = propertyB.N_ALLELE_NUM_EQ_1[i] & validSampleStatus;
+
+                    // 获得等位基因个数为 2 的位信息
+                    countA_N_ALLELE_NUM_EQ_2_status = propertyA.N_ALLELE_NUM_EQ_2[i] & validSampleStatus;
+                    countB_N_ALLELE_NUM_EQ_2_status = propertyB.N_ALLELE_NUM_EQ_2[i] & validSampleStatus;
+
+                    countA_N_ALLELE_NUM_EQ_1 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status);
+                    countB_N_ALLELE_NUM_EQ_1 += Integer.bitCount(countB_N_ALLELE_NUM_EQ_1_status);
+                    countA_N_ALLELE_NUM_EQ_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_2_status);
+                    countB_N_ALLELE_NUM_EQ_2 += Integer.bitCount(countB_N_ALLELE_NUM_EQ_2_status);
+
+                    countAB_ALLELE_NUM_EQ_1_1 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status & countB_N_ALLELE_NUM_EQ_1_status);
+                    countAB_ALLELE_NUM_EQ_1_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status & countB_N_ALLELE_NUM_EQ_2_status) + Integer.bitCount(countB_N_ALLELE_NUM_EQ_1_status & countA_N_ALLELE_NUM_EQ_2_status);
+                    countAB_ALLELE_NUM_EQ_2_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_2_status & countB_N_ALLELE_NUM_EQ_2_status);
+                }
+            }
+
+            sumAB = countAB_ALLELE_NUM_EQ_1_1 + (countAB_ALLELE_NUM_EQ_1_2 << 1) + (countAB_ALLELE_NUM_EQ_2_2 << 2);
+            sumA = countA_N_ALLELE_NUM_EQ_1 + (countA_N_ALLELE_NUM_EQ_2 << 1);
+            sumB = countB_N_ALLELE_NUM_EQ_1 + (countB_N_ALLELE_NUM_EQ_2 << 1);
+            sumA_square = countA_N_ALLELE_NUM_EQ_1 + (countA_N_ALLELE_NUM_EQ_2 << 2);
+            sumB_square = countB_N_ALLELE_NUM_EQ_1 + (countB_N_ALLELE_NUM_EQ_2 << 2);
+
+            if (validSampleNum == 0) {
+                // 全是缺失的, 此时认为两位点的 LD 系数为 Nan (因为无法判断)
+                return Double.NaN;
+            }
+        } else {
+            // 没有任何缺失，此时借助缓冲数据提升速度
+            validSampleNum = variant1.BEGs.length;
+
+            int countAB_ALLELE_NUM_EQ_1_1 = 0;
+            int countAB_ALLELE_NUM_EQ_1_2 = 0;
+            int countAB_ALLELE_NUM_EQ_2_2 = 0;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                countAB_ALLELE_NUM_EQ_1_1 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_1[i] & propertyB.N_ALLELE_NUM_EQ_1[i]);
+                countAB_ALLELE_NUM_EQ_1_2 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_1[i] & propertyB.N_ALLELE_NUM_EQ_2[i]) + Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_2[i] & propertyB.N_ALLELE_NUM_EQ_1[i]);
+                countAB_ALLELE_NUM_EQ_2_2 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_2[i] & propertyB.N_ALLELE_NUM_EQ_2[i]);
+            }
+
+            sumA = propertyA.N_ALT;
+            sumB = propertyB.N_ALT;
+            sumAB = countAB_ALLELE_NUM_EQ_1_1 + (countAB_ALLELE_NUM_EQ_1_2 << 1) + (countAB_ALLELE_NUM_EQ_2_2 << 2);
+            sumA_square = propertyA.N_ALLELE_I_SQUARE;
+            sumB_square = propertyB.N_ALLELE_I_SQUARE;
+        }
+
+        // 分子和分母
+        double r_numerator = sumAB - (double) sumA * sumB / validSampleNum;
+        double r_denominator_square = (sumA_square - (double) sumA * sumA / validSampleNum) * (sumB_square - (double) sumB * sumB / validSampleNum);
+
+        if (r_denominator_square == 0) {
+            return Double.NaN;
+        }
+
+        return r_numerator * r_numerator / r_denominator_square;
+    }
+
+    @Override
+    public double calculateLD(Variant variant1, Variant variant2) {
+        if (variant1.BEGs.length != variant2.BEGs.length) {
+            throw new UnsupportedOperationException("LD coefficients are calculated between sites with different sample sizes");
+        }
+
+        if (variant1.getAlternativeAlleleNum() > 2 || variant2.getAlternativeAlleleNum() > 2) {
+            throw new UnsupportedOperationException("LD coefficients are calculated between sites with number of alternative allele > 2");
+        }
+
+        if (!(variant1.property instanceof VariantProperty)) {
+            variant1.property = getProperty(variant1.BEGs.length).fillBitCodes(variant1);
+        }
+
+        if (!(variant2.property instanceof VariantProperty)) {
+            variant2.property = getProperty(variant2.BEGs.length).fillBitCodes(variant2);
+        }
+
+        VariantProperty propertyA = (VariantProperty) variant1.property;
+        VariantProperty propertyB = (VariantProperty) variant2.property;
+
+        int validSampleNum;
+        int sumA;
+        int sumB;
+        int sumAB;
+        int sumA_square;
+        int sumB_square;
+
+        if (propertyA.hasMiss || propertyB.hasMiss) {
+            // 至少有一个位点包含 miss 基因型时，需要重新计算
+            validSampleNum = 0;
+            int countA_N_ALLELE_NUM_EQ_1 = 0;
+            int countA_N_ALLELE_NUM_EQ_2 = 0;
+            int countB_N_ALLELE_NUM_EQ_1 = 0;
+            int countB_N_ALLELE_NUM_EQ_2 = 0;
+            int countAB_ALLELE_NUM_EQ_1_1 = 0;
+            int countAB_ALLELE_NUM_EQ_1_2 = 0;
+            int countAB_ALLELE_NUM_EQ_2_2 = 0;
+            int countA_N_ALLELE_NUM_EQ_1_status;
+            int countA_N_ALLELE_NUM_EQ_2_status;
+            int countB_N_ALLELE_NUM_EQ_1_status;
+            int countB_N_ALLELE_NUM_EQ_2_status;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                // 有效等位基因状态及个数
+                int validSampleStatus = (propertyA.validSampleFlags[i] & propertyB.validSampleFlags[i]);
+                int currentValidSampleNum = Integer.bitCount(validSampleStatus);
+
+                if (currentValidSampleNum > 0) {
+                    // 不全是缺失，获取相交等位基因
+                    validSampleNum += currentValidSampleNum;
+
+                    // 获得等位基因个数为 1 的位信息
+                    countA_N_ALLELE_NUM_EQ_1_status = propertyA.N_ALLELE_NUM_EQ_1[i] & validSampleStatus;
+                    countB_N_ALLELE_NUM_EQ_1_status = propertyB.N_ALLELE_NUM_EQ_1[i] & validSampleStatus;
+
+                    // 获得等位基因个数为 2 的位信息
+                    countA_N_ALLELE_NUM_EQ_2_status = propertyA.N_ALLELE_NUM_EQ_2[i] & validSampleStatus;
+                    countB_N_ALLELE_NUM_EQ_2_status = propertyB.N_ALLELE_NUM_EQ_2[i] & validSampleStatus;
+
+                    countA_N_ALLELE_NUM_EQ_1 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status);
+                    countB_N_ALLELE_NUM_EQ_1 += Integer.bitCount(countB_N_ALLELE_NUM_EQ_1_status);
+                    countA_N_ALLELE_NUM_EQ_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_2_status);
+                    countB_N_ALLELE_NUM_EQ_2 += Integer.bitCount(countB_N_ALLELE_NUM_EQ_2_status);
+
+                    countAB_ALLELE_NUM_EQ_1_1 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status & countB_N_ALLELE_NUM_EQ_1_status);
+                    countAB_ALLELE_NUM_EQ_1_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_1_status & countB_N_ALLELE_NUM_EQ_2_status) + Integer.bitCount(countB_N_ALLELE_NUM_EQ_1_status & countA_N_ALLELE_NUM_EQ_2_status);
+                    countAB_ALLELE_NUM_EQ_2_2 += Integer.bitCount(countA_N_ALLELE_NUM_EQ_2_status & countB_N_ALLELE_NUM_EQ_2_status);
+                }
+            }
+
+            sumAB = countAB_ALLELE_NUM_EQ_1_1 + (countAB_ALLELE_NUM_EQ_1_2 << 1) + (countAB_ALLELE_NUM_EQ_2_2 << 2);
+            sumA = countA_N_ALLELE_NUM_EQ_1 + (countA_N_ALLELE_NUM_EQ_2 << 1);
+            sumB = countB_N_ALLELE_NUM_EQ_1 + (countB_N_ALLELE_NUM_EQ_2 << 1);
+            sumA_square = countA_N_ALLELE_NUM_EQ_1 + (countA_N_ALLELE_NUM_EQ_2 << 2);
+            sumB_square = countB_N_ALLELE_NUM_EQ_1 + (countB_N_ALLELE_NUM_EQ_2 << 2);
+
+            if (validSampleNum == 0) {
+                // 全是缺失的, 此时认为两位点的 LD 系数为 Nan (因为无法判断)
+                return Double.NaN;
+            }
+        } else {
+            // 没有任何缺失，此时借助缓冲数据提升速度
+            validSampleNum = variant1.BEGs.length;
+
+            int countAB_ALLELE_NUM_EQ_1_1 = 0;
+            int countAB_ALLELE_NUM_EQ_1_2 = 0;
+            int countAB_ALLELE_NUM_EQ_2_2 = 0;
+
+            for (int i = 0; i < propertyA.groupNum; i++) {
+                countAB_ALLELE_NUM_EQ_1_1 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_1[i] & propertyB.N_ALLELE_NUM_EQ_1[i]);
+                countAB_ALLELE_NUM_EQ_1_2 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_1[i] & propertyB.N_ALLELE_NUM_EQ_2[i]) + Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_2[i] & propertyB.N_ALLELE_NUM_EQ_1[i]);
+                countAB_ALLELE_NUM_EQ_2_2 += Integer.bitCount(propertyA.N_ALLELE_NUM_EQ_2[i] & propertyB.N_ALLELE_NUM_EQ_2[i]);
+            }
+
+            sumA = propertyA.N_ALT;
+            sumB = propertyB.N_ALT;
+            sumAB = countAB_ALLELE_NUM_EQ_1_1 + (countAB_ALLELE_NUM_EQ_1_2 << 1) + (countAB_ALLELE_NUM_EQ_2_2 << 2);
+            sumA_square = propertyA.N_ALLELE_I_SQUARE;
+            sumB_square = propertyB.N_ALLELE_I_SQUARE;
+        }
+
+        // 分子和分母
+        double r_numerator = sumAB - (double) sumA * sumB / validSampleNum;
+        double r_denominator_square = (sumA_square - (double) sumA * sumA / validSampleNum) * (sumB_square - (double) sumB * sumB / validSampleNum);
+
+        if (r_denominator_square == 0) {
+            return Double.NaN;
+        }
+
+        return r_numerator / Math.sqrt(r_denominator_square);
     }
 
     @Override

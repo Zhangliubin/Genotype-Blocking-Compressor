@@ -61,6 +61,10 @@ class DecompressionCache {
         }
     }
 
+    public void fill(Pointer pointer) throws IOException {
+        fill(pointer, true);
+    }
+
     public void fill(Pointer pointer, boolean decompressGT) throws IOException {
         if ((pointer.nodeIndex != this.nodeIndex || pointer.node.chromosomeIndex != this.chromosomeIndex)) {
             // 位置不在同一个 block 中，此时切换块数据
@@ -114,7 +118,7 @@ class DecompressionCache {
         }
     }
 
-    public void decompressGT(GTBNode node, Pointer pointer, boolean decompressGT) throws IOException {
+    private void decompressGT(GTBNode node, Pointer pointer, boolean decompressGT) throws IOException {
         /* 读取 genotype 数据并解压 */
         if (decompressGT) {
             undecompressedCache.reset();

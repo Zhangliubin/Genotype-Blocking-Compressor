@@ -31,7 +31,7 @@ class GroupSubjectFormatter {
 
         this.subjects = subjects;
         this.subjectIndexBiDict = null;
-        this.subjectNum = ArrayUtils.valueCounts(subjects, ByteCode.TAB) + 1;
+        this.subjectNum = subjects.length == 0 ? 0 : ArrayUtils.valueCounts(subjects, ByteCode.TAB) + 1;
     }
 
     /**
@@ -48,7 +48,7 @@ class GroupSubjectFormatter {
             this.subjectNum = this.subjectIndexBiDict.size();
         } else {
             this.subjectIndexBiDict = null;
-            this.subjectNum = ArrayUtils.valueCounts(subjects, ByteCode.TAB) + 1;
+            this.subjectNum = subjects.length == 0 ? 0 : ArrayUtils.valueCounts(subjects, ByteCode.TAB) + 1;
         }
     }
 

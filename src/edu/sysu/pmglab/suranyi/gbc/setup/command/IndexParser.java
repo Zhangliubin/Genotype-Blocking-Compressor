@@ -51,6 +51,11 @@ enum IndexParser {
                 .convertTo(new StringConverter())
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
                 .setOptionGroup("Options");
+        parser.register("--deep-scan")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Options")
+                .setDescription("Scan all sites in the file to build the contig file.");
         parser.register("--output", "-o")
                 .arity(1)
                 .convertTo(new StringConverter())

@@ -7,6 +7,8 @@ import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.build.RebuildTask;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleFreqTestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.LDTestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.MixChecker;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -96,32 +98,44 @@ enum RebuildFunction {
             }
 
             if (options.isPassedIn("--retain")) {
-                task.retain((HashMap<Integer, int[]>) options.get("--retain"));
+                task.retain((HashMap<String, int[]>) options.get("--retain"));
             }
 
             if (options.isPassedIn("--delete")) {
-                task.retain((HashMap<Integer, int[]>) options.get("--delete"));
+                task.retain((HashMap<String, int[]>) options.get("--delete"));
             }
 
-            if (options.isPassedIn("--align")) {
-                task.alignWith((String) options.get("--align"));
-
-                if (options.isPassedIn("--check-allele")) {
-                    if (options.isPassedIn("--freq-gap")) {
-                        task.setAlleleChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap")));
-                    } else if (options.isPassedIn("--p-value")) {
-                        task.setAlleleChecker(new Chi2TestChecker((double) options.get("--p-value")));
-                    } else {
-                        task.setAlleleChecker(true);
-                    }
-                }
-            }
-            task.setSiteMergeType((String) (options.get("--method")));
-            
             // 输出日志
             System.out.println("INFO    Start running " + task);
             long jobStart = System.currentTimeMillis();
-            task.submit();
+            if (options.isPassedIn("--align")) {
+                if (options.isPassedIn("--no-ld")) {
+                    if (options.isPassedIn("--freq-gap")) {
+                        task.alignWith((String) options.get("--align"), (String) options.get("--method"), new AlleleFreqTestChecker((double) options.get("--freq-gap"), (double) options.get("--maf")));
+                    } else {
+                        task.alignWith((String) options.get("--align"), (String) options.get("--method"), new Chi2TestChecker((double) options.get("--p-value"), (double) options.get("--maf")));
+                    }
+                } else {
+                    if (options.isPassedIn("--freq-gap")) {
+                        task.alignWith((String) options.get("--align"), (String) options.get("--method"), new MixChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap"), (double) options.get("--maf")), new LDTestChecker((double) options.get("--min-r"), (double) options.get("--flip-scan-threshold"), (int) options.get("--window-bp"), (double) options.get("--maf"))));
+                    } else {
+                        task.alignWith((String) options.get("--align"), (String) options.get("--method"), new MixChecker(new Chi2TestChecker((double) options.get("--p-value"), (double) options.get("--maf")), new LDTestChecker((double) options.get("--min-r"), (double) options.get("--flip-scan-threshold"), (int) options.get("--window-bp"), (double) options.get("--maf"))));
+                    }
+                }
+            } else if (options.isPassedIn("--multiallelic")) {
+                task.convertToMultiallelic();
+            } else if (options.isPassedIn("--biallelic")) {
+                task.convertToBiallelic();
+            } else {
+                if (options.isPassedIn("--range")) {
+                    Coordinate range = (Coordinate) options.get("--range");
+                    task.rebuildByRange(range.chromosome, range.startPos, range.endPos);
+                } else if (options.isPassedIn("--random")) {
+                    task.rebuildByPosition((HashMap<String, int[]>) options.get("--random"));
+                } else {
+                    task.rebuildAll();
+                }
+            }
             long jobEnd = System.currentTimeMillis();
 
             // 结束任务，输出日志信息

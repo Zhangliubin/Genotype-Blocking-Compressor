@@ -1,9 +1,8 @@
 package edu.sysu.pmglab.suranyi.gbc.core.build;
 
 import edu.sysu.pmglab.suranyi.container.SmartList;
-import edu.sysu.pmglab.suranyi.easytools.ByteCode;
+import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.FileUtils;
-import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleQC;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantQC;
@@ -28,9 +27,11 @@ class AlignedKernel {
     final AlleleQC alleleQC;
     final RebuildTask task;
     final AlleleChecker alleleChecker;
-    final HashSet<String>[] loadInChromosomes;
+    final HashSet<Integer> loadInChromosomes;
+    final GTBManager templateFile;
+    final GTBManager inputFile;
+    boolean keepAll;
 
-    static byte[] missAllele = new byte[]{ByteCode.PERIOD};
     static HashMap<Byte, Byte> complementaryBase = new HashMap<>();
 
     static {
@@ -44,9 +45,12 @@ class AlignedKernel {
         complementaryBase.put(G, C);
     }
 
-    AlignedKernel(RebuildTask task) throws IOException {
+    AlignedKernel(RebuildTask task, GTBManager templateFile, boolean keepAll, AlleleChecker checker) throws IOException {
         this.task = task;
-        this.alleleChecker = this.task.getAlleleChecker();
+        this.alleleChecker = checker;
+        this.templateFile = templateFile;
+        this.inputFile = task.getInputFile();
+        this.keepAll = keepAll;
 
         // 记录坐标
         this.loadInChromosomes = recordChromosome();
@@ -63,45 +67,37 @@ class AlignedKernel {
         }
     }
 
-    public static void submit(RebuildTask task) throws IOException {
-        new AlignedKernel(task);
+    public static void submit(RebuildTask task, GTBManager templateFile, boolean keepAll, AlleleChecker checker) throws IOException {
+        new AlignedKernel(task, templateFile, keepAll, checker);
     }
 
-    HashSet<String>[] recordChromosome() {
+    HashSet<Integer> recordChromosome() {
         // 记录坐标，如果坐标太多，可以考虑分染色体读取 (使用 reader.limit 语句)
-        HashSet<String>[] loadInChromosomes = new HashSet[2];
+        HashSet<Integer> loadInChromosomes = new HashSet<>();
 
-        loadInChromosomes[0] = new HashSet<>();
-        for (int chromosome : this.task.getTemplateFile().getChromosomeList()) {
-            loadInChromosomes[0].add(ChromosomeInfo.getString(chromosome));
-        }
-
-        loadInChromosomes[1] = new HashSet<>();
-        for (int chromosome : this.task.getInputFile().getChromosomeList()) {
-            loadInChromosomes[1].add(ChromosomeInfo.getString(chromosome));
-        }
-
-        if (this.task.isKeepAll()) {
+        if (this.keepAll) {
             // 合并所有坐标
-            loadInChromosomes[1].addAll(loadInChromosomes[0]);
+            loadInChromosomes.addAll(ArrayUtils.toArrayList(templateFile.getChromosomeList()));
+            loadInChromosomes.addAll(ArrayUtils.toArrayList(inputFile.getChromosomeList()));
         } else {
-            // 先在染色体水平取交集
-            loadInChromosomes[1].retainAll(loadInChromosomes[0]);
-            loadInChromosomes[0] = loadInChromosomes[1];
+            // 取交集 (先保留第一个文件的染色体)
+            loadInChromosomes.addAll(ArrayUtils.toArrayList(templateFile.getChromosomeList()));
+            loadInChromosomes.retainAll(ArrayUtils.toArrayList(inputFile.getChromosomeList()));
         }
 
         return loadInChromosomes;
     }
 
-    HashSet<Integer> recordPosition(GTBReader reader1, GTBReader reader2, String chromosome) throws IOException {
-        if (this.task.isKeepAll()) {
+
+    HashSet<Integer> recordPosition(GTBReader reader1, GTBReader reader2, int chromosomeIndex) throws IOException {
+        if (this.keepAll) {
             return null;
         } else {
             HashSet<Integer> loadInPosition1 = new HashSet<>();
 
             reader1 = new GTBReader(reader1.getManager(), false, false);
-            reader1.limit(chromosome);
-            reader1.seek(chromosome, 0);
+            reader1.limit(chromosomeIndex);
+            reader1.seek(chromosomeIndex, 0);
 
             // 先加载第一个文件全部的位点
             for (Variant variant : reader1) {
@@ -112,8 +108,8 @@ class AlignedKernel {
 
             // 再移除第二个文件中没有的位点
             reader2 = new GTBReader(reader2.getManager(), false, false);
-            reader2.limit(chromosome);
-            reader2.seek(chromosome, 0);
+            reader2.limit(chromosomeIndex);
+            reader2.seek(chromosomeIndex, 0);
 
             HashSet<Integer> loadInPosition2 = new HashSet<>();
             for (Variant variant : reader2) {
@@ -138,14 +134,14 @@ class AlignedKernel {
 
     void startWithAlleleCheck() throws IOException {
         // 校正等位基因
-        GTBReader reader1 = new GTBReader(this.task.getTemplateFile(), this.task.getTemplateFile().isPhased(), false);
-        GTBReader reader2 = new GTBReader(this.task.getInputFile());
+        GTBReader reader1 = new GTBReader(this.templateFile, this.task.isPhased());
+        GTBReader reader2 = new GTBReader(this.task.getInputFile(), this.task.isPhased());
         if (this.task.getSubjects() != null) {
             reader2.selectSubjects(this.task.getSubjects());
         }
         GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.isInplace() ? this.task.getOutputFileName() + ".~$temp" : this.task.getOutputFileName());
         writerBuilder.setPhased(this.task.isPhased());
-        writerBuilder.setSubject(reader2.getAllSubjects());
+        writerBuilder.setSubject(reader2.getSelectedSubjects());
         writerBuilder.setReference(reader1.getManager().getReference());
         writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
         writerBuilder.setReordering(this.task.isReordering());
@@ -161,27 +157,29 @@ class AlignedKernel {
         SmartList<Variant> variants1Cache = new SmartList<>();
         SmartList<Variant> variants2 = null;
         SmartList<Variant> variants2Cache = new SmartList<>();
+        this.alleleChecker.setReader(reader1.getManager(), reader2.getManager());
 
         for (int i = 0; i < 1; i++) {
             variants1Cache.add(new Variant());
             variants2Cache.add(new Variant());
         }
 
-        for (String chromosome : loadInChromosomes[1]) {
+        for (int chromosomeIndex : loadInChromosomes) {
             boolean condition1 = false;
             boolean condition2 = false;
-            HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
+            HashSet<Integer> position = recordPosition(reader1, reader2, chromosomeIndex);
+            this.alleleChecker.setPosition(position);
 
-            if (manager1.contain(chromosome)) {
-                reader1.limit(chromosome);
-                reader1.seek(chromosome, 0);
+            if (manager1.contain(chromosomeIndex)) {
+                reader1.limit(chromosomeIndex);
+                reader1.seek(chromosomeIndex, 0);
                 variants1 = reader1.readVariants(variants1Cache, position);
                 condition1 = variants1 != null;
             }
 
-            if (manager2.contain(chromosome)) {
-                reader2.limit(chromosome);
-                reader2.seek(chromosome, 0);
+            if (manager2.contain(chromosomeIndex)) {
+                reader2.limit(chromosomeIndex);
+                reader2.seek(chromosomeIndex, 0);
                 variants2 = reader2.readVariants(variants2Cache, position);
                 condition2 = variants2 != null;
             }
@@ -325,14 +323,14 @@ class AlignedKernel {
     }
 
     void startWithoutAlleleCheck() throws IOException {
-        GTBReader reader1 = new GTBReader(this.task.getTemplateFile(), this.task.getTemplateFile().isPhased(), false);
-        GTBReader reader2 = new GTBReader(this.task.getInputFile());
+        GTBReader reader1 = new GTBReader(this.templateFile, this.task.isPhased(), false);
+        GTBReader reader2 = new GTBReader(this.task.getInputFile(), this.task.isPhased());
         if (this.task.getSubjects() != null) {
             reader2.selectSubjects(this.task.getSubjects());
         }
         GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.isInplace() ? this.task.getOutputFileName() + ".~$temp" : this.task.getOutputFileName());
         writerBuilder.setPhased(this.task.isPhased());
-        writerBuilder.setSubject(reader2.getAllSubjects());
+        writerBuilder.setSubject(reader2.getSelectedSubjects());
         writerBuilder.setReference(reader1.getManager().getReference());
         writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
         writerBuilder.setReordering(this.task.isReordering());
@@ -354,7 +352,7 @@ class AlignedKernel {
             variants2Cache.add(new Variant());
         }
 
-        for (String chromosome : loadInChromosomes[1]) {
+        for (int chromosome : loadInChromosomes) {
             boolean condition1 = false;
             boolean condition2 = false;
             HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
@@ -424,7 +422,7 @@ class AlignedKernel {
                             // 只有一个位点，直接比对
                             Variant variant1 = variants1.get(0);
                             Variant variant2 = variants2.get(0);
-                            variant2.resetAlleles(variant1.REF, variant1.ALT);
+                            variant2.resetAlleles(variant1.REF);
                             writeToFile(variant2, writer);
                         } else {
                             // 多对多 (先找一致项，不一致的再进行匹配)
@@ -438,7 +436,7 @@ class AlignedKernel {
                                     if ((Arrays.equals(variant1.REF, variant2.REF) && Arrays.equals(variant1.ALT, variant2.ALT)) ||
                                             (Arrays.equals(variant1.REF, variant2.ALT) && Arrays.equals(variant1.ALT, variant2.REF))) {
                                         // 基本逻辑: 完全一致的碱基序列的位点直接合并，并且只合并一次
-                                        variant2.resetAlleles(variant1.REF, variant1.ALT);
+                                        variant2.resetAlleles(variant1.REF);
                                         writeToFile(variant2, writer);
                                         variants2.remove(variant2);
                                         variants2Cache.add(variant2);
@@ -473,7 +471,7 @@ class AlignedKernel {
                                         Variant variant1 = variants1new.get(i);
                                         if (variants2.size() > 0) {
                                             Variant variant2 = variants2.popFirst();
-                                            variant2.resetAlleles(variant1.REF, variant1.ALT);
+                                            variant2.resetAlleles(variant1.REF);
                                             writeToFile(variant2, writer);
                                             variants2Cache.add(variant2);
                                             continue;
@@ -513,7 +511,7 @@ class AlignedKernel {
         }
     }
 
-    Variant alignVariantWithAlleleCheck(Variant variant1, Variant variant2) {
+    Variant alignVariantWithAlleleCheck(Variant variant1, Variant variant2) throws IOException {
         int AC12 = variant1.getAC();
         int AN1 = variant1.getAN();
         int AC11 = AN1 - AC12;
@@ -546,7 +544,7 @@ class AlignedKernel {
             byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
             byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
             if (Arrays.equals(variant1.REF, variant2.REF)) {
-                if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                     variant2.REF = variant2.ALT;
                     variant2.ALT = variant1.REF;
                     variant1.ALT = variant2.REF;
@@ -556,7 +554,7 @@ class AlignedKernel {
                     AC = AC22;
                 }
             } else if (Arrays.equals(variant1.REF, variant2.ALT)) {
-                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                     variant2.ALT = variant2.REF;
                     variant2.REF = variant1.REF;
                     variant1.ALT = variant2.ALT;
@@ -565,12 +563,12 @@ class AlignedKernel {
                     variant1.ALT = variant2.REF;
                     AC = AC21;
                 }
-            } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+            } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                 variant2.REF = variant1.REF;
                 variant2.ALT = inverseAlleleVariant2ALT;
                 variant1.ALT = variant2.ALT;
                 AC = AC22;
-            } else if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+            } else if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                 variant2.ALT = variant1.REF;
                 variant2.REF = inverseAlleleVariant2REF;
                 variant1.ALT = variant2.REF;
@@ -587,7 +585,7 @@ class AlignedKernel {
             byte[] inverseAlleleVariant1ALT = getInverseAllele(variant1.ALT);
             byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
             if (Arrays.equals(variant2.REF, variant1.REF)) {
-                if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                     variant2.REF = variant1.ALT;
                     variant2.ALT = variant1.REF;
                     AC = AC21;
@@ -596,7 +594,7 @@ class AlignedKernel {
                     AC = AC22;
                 }
             } else if (Arrays.equals(variant2.REF, variant1.ALT)) {
-                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                     variant2.REF = variant1.REF;
                     variant2.ALT = variant1.ALT;
                     AC = AC22;
@@ -604,11 +602,11 @@ class AlignedKernel {
                     variant2.ALT = variant1.REF;
                     AC = AC21;
                 }
-            } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+            } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                 variant2.REF = variant1.REF;
                 variant2.ALT = variant1.ALT;
                 AC = AC22;
-            } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+            } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                 variant2.REF = variant1.ALT;
                 variant2.ALT = variant1.REF;
                 AC = AC21;
@@ -623,13 +621,13 @@ class AlignedKernel {
                 byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
                 byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
                 if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && Arrays.equals(variant1.ALT, inverseAlleleVariant2ALT)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = variant1.ALT;
                         AC = AC22;
                     }
                 } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.REF = variant1.ALT;
                         variant2.ALT = variant1.REF;
                         AC = AC21;
@@ -640,13 +638,13 @@ class AlignedKernel {
             } else if (alleleNum1 == 2) {
                 byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
                 if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC22;
                     }
                 } else if (Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.REF = variant1.ALT;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                     }
@@ -656,13 +654,13 @@ class AlignedKernel {
             } else if (alleleNum2 == 2) {
                 byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
                 if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC22;
                     }
                 } else if (Arrays.equals(variant2.ALT, inverseAlleleVariant1REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.ALT = variant1.REF;
                         variant2.REF = getInverseAllele(variant2.REF);
                     }
@@ -672,7 +670,7 @@ class AlignedKernel {
             } else {
                 // 都是多等位基因位点，只检查 ref
                 if (Arrays.equals(variant1.REF, getInverseAllele(variant2.REF))) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC22;
@@ -684,7 +682,7 @@ class AlignedKernel {
         }
 
         // 合并位点到 target
-        variant2.resetAlleles(variant1.REF, variant1.ALT);
+        variant2.resetAlleles(variant1.REF);
 
         if (this.variantQC.filter(null, variant2.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
             return null;

@@ -78,11 +78,11 @@ enum EditParser {
                 .setDescription("Retain the unique GTBNodes.");
         parser.register("--delete")
                 .arity(1)
-                .convertTo(new KVConverter<Integer, int[]>("chrom", "node") {
+                .convertTo(new KVConverter<String, int[]>("chrom", "node") {
                     @Override
-                    public HashMap<Integer, int[]> convert(String... params) {
+                    public HashMap<String, int[]> convert(String... params) {
                         HashMap<String, String> KV = super.parseKV(params);
-                        HashMap<Integer, int[]> result = new HashMap<>();
+                        HashMap<String, int[]> result = new HashMap<>();
 
                         if (!KV.containsKey("chrom") || (KV.get("chrom") == null) || (KV.get("chrom").length() == 0)) {
                             throw new ParameterException("no chromosomes specified");
@@ -97,11 +97,11 @@ enum EditParser {
                                 }
 
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), nodeIndexes);
+                                    result.put(chromosome, nodeIndexes);
                                 }
                             } else {
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), null);
+                                    result.put(chromosome, null);
                                 }
                             }
                         }
@@ -113,11 +113,11 @@ enum EditParser {
                 .setFormat("'--delete chrom=<string>,<string>,...' or '--delete chrom=<string>,<string>,...;node=<int>,<int>,...'");
         parser.register("--retain")
                 .arity(1)
-                .convertTo(new KVConverter<Integer, int[]>("chrom", "node") {
+                .convertTo(new KVConverter<String, int[]>("chrom", "node") {
                     @Override
-                    public HashMap<Integer, int[]> convert(String... params) {
+                    public HashMap<String, int[]> convert(String... params) {
                         HashMap<String, String> KV = super.parseKV(params);
-                        HashMap<Integer, int[]> result = new HashMap<>();
+                        HashMap<String, int[]> result = new HashMap<>();
 
                         if (!KV.containsKey("chrom") || (KV.get("chrom") == null) || (KV.get("chrom").length() == 0)) {
                             throw new ParameterException("no chromosomes specified");
@@ -132,11 +132,11 @@ enum EditParser {
                                 }
 
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), nodeIndexes);
+                                    result.put(chromosome, nodeIndexes);
                                 }
                             } else {
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), null);
+                                    result.put(chromosome, null);
                                 }
                             }
                         }

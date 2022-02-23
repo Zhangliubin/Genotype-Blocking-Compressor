@@ -1,15 +1,13 @@
 package edu.sysu.pmglab.suranyi.gbc.core.build;
 
-import edu.sysu.pmglab.suranyi.check.Value;
 import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
-import edu.sysu.pmglab.suranyi.easytools.ValueUtils;
 import edu.sysu.pmglab.suranyi.gbc.core.common.block.VariantAbstract;
 import edu.sysu.pmglab.suranyi.gbc.core.common.switcher.ISwitcher;
 
 /**
- * @Data        :2021/04/25
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
+ * @Data :2021/04/25
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
  * @Description :未压缩的块数据 (基因型数据保存为 BEG 编码形式)
  */
 

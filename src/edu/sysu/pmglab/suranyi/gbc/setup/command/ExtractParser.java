@@ -139,7 +139,7 @@ enum ExtractParser {
                 .convertTo(params -> {
                     RangeWithIndexConverter converter = new RangeWithIndexConverter();
                     String[] range = converter.convert(params);
-                    return new int[]{ChromosomeInfo.getIndex(range[0]), range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2])};
+                    return new Coordinate(range[0], range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2]));
                 })
                 .setOptionGroup("Subset Selection Options")
                 .setDescription("Extract the information by position range.")
@@ -150,13 +150,13 @@ enum ExtractParser {
                     Assert.that(params.length == 1);
 
                     // 使用 HashSet 保存位点，实现去重效果
-                    HashMap<Integer, SmartList<Integer>> elementSet = new HashMap<>();
-                    HashMap<Integer, int[]> target = new HashMap<>();
+                    HashMap<String, SmartList<Integer>> elementSet = new HashMap<>();
+                    HashMap<String, int[]> target = new HashMap<>();
 
                     // 打开并读取文件
                     try (FileStream fs = new FileStream(params[0])) {
                         String line;
-                        int chromosomeIndex;
+                        String chromosome;
                         int position;
 
                         while ((line = fs.readLineToString()) != null) {
@@ -173,19 +173,19 @@ enum ExtractParser {
                                 throw new ParameterException("couldn't convert " + line + " to 'chrom,pos' or 'chrom<\\t>position'");
                             }
 
-                            chromosomeIndex = ChromosomeInfo.getIndex(split[0]);
+                            chromosome = split[0];
 
                             // 匹配 position
                             position = Integer.parseInt(split[1]);
-                            if (!elementSet.containsKey(chromosomeIndex)) {
-                                elementSet.put(chromosomeIndex, new SmartList<>(1024, true));
+                            if (!elementSet.containsKey(chromosome)) {
+                                elementSet.put(chromosome, new SmartList<>(1024, true));
                             }
-                            elementSet.get(chromosomeIndex).add(position);
+                            elementSet.get(chromosome).add(position);
                         }
 
                         // 为位点排序
-                        for (int chromosomeInd : elementSet.keySet()) {
-                            SmartList<Integer> positions = elementSet.get(chromosomeInd);
+                        for (String chromosomeN : elementSet.keySet()) {
+                            SmartList<Integer> positions = elementSet.get(chromosomeN);
                             if ((positions != null) && (positions.size() > 0)) {
                                 // 元素去重
                                 positions.dropDuplicated();
@@ -194,7 +194,7 @@ enum ExtractParser {
                                 positions.sort(Integer::compare);
 
                                 // 提取最终结果
-                                target.put(chromosomeInd, positions.toIntegerArray());
+                                target.put(chromosomeN, positions.toIntegerArray());
                             }
                         }
 
@@ -208,32 +208,31 @@ enum ExtractParser {
                 .setFormat("'--random <file>'");
         parser.register("--node")
                 .arity(1)
-                .convertTo(new KVConverter<Integer, int[]>("chrom", "node") {
+                .convertTo(new KVConverter<String, int[]>("chrom", "node") {
                     @Override
-                    public HashMap<Integer, int[]> convert(String... params) {
+                    public HashMap<String, int[]> convert(String... params) {
                         HashMap<String, String> KV = super.parseKV(params);
+                        HashMap<String, int[]> result = new HashMap<>();
 
                         if (!KV.containsKey("chrom") || (KV.get("chrom") == null) || (KV.get("chrom").length() == 0)) {
                             throw new ParameterException("no chromosomes specified");
-                        }
-
-                        HashMap<Integer, int[]> result = new HashMap<>();
-
-                        String[] chromosomes = KV.get("chrom").split(",");
-                        if (KV.containsKey("node") && (KV.get("node") != null) && (KV.get("node").length() != 0)) {
-                            String[] nodeIndexesStr = KV.get("node").split(",");
-                            int[] nodeIndexes = new int[nodeIndexesStr.length];
-
-                            for (int i = 0; i < nodeIndexes.length; i++) {
-                                nodeIndexes[i] = Integer.parseInt(nodeIndexesStr[i]);
-                            }
-
-                            for (String chromosome : chromosomes) {
-                                result.put(ChromosomeInfo.getIndex(chromosome), nodeIndexes);
-                            }
                         } else {
-                            for (String chromosome : chromosomes) {
-                                result.put(ChromosomeInfo.getIndex(chromosome), null);
+                            String[] chromosomes = KV.get("chrom").split(",");
+                            if (KV.containsKey("node") && (KV.get("node") != null) && (KV.get("node").length() != 0)) {
+                                String[] nodeIndexesStr = KV.get("node").split(",");
+                                int[] nodeIndexes = new int[nodeIndexesStr.length];
+
+                                for (int i = 0; i < nodeIndexes.length; i++) {
+                                    nodeIndexes[i] = Integer.parseInt(nodeIndexesStr[i]);
+                                }
+
+                                for (String chromosome : chromosomes) {
+                                    result.put(chromosome, nodeIndexes);
+                                }
+                            } else {
+                                for (String chromosome : chromosomes) {
+                                    result.put(chromosome, null);
+                                }
                             }
                         }
                         return result;

@@ -2,23 +2,19 @@ package edu.sysu.pmglab.suranyi.gbc.core.build;
 
 import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
-import edu.sysu.pmglab.suranyi.easytools.ByteCode;
 import edu.sysu.pmglab.suranyi.easytools.FileUtils;
-import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleQC;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantQC;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
+import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBRootCache;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.GTBReader;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.Variant;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriter;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbwriter.GTBWriterBuilder;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.*;
 
 /**
  * @author suranyi
@@ -30,10 +26,16 @@ class MergeKernel {
     final AlleleQC alleleQC;
     final MergeTask task;
     final AlleleChecker alleleChecker;
-    final HashSet<String>[] loadInChromosomes;
+    final HashSet<Integer> loadInChromosomes;
+    final boolean convert2Biallelic;
+    final SmartList<GTBManager> managers;
 
-    static byte[] missAllele = new byte[]{ByteCode.PERIOD};
     static HashMap<Byte, Byte> complementaryBase = new HashMap<>();
+
+    /**
+     * 文件最小堆
+     */
+    final Queue<GTBManager> fileQueue;
 
     static {
         byte A = 65;
@@ -49,18 +51,20 @@ class MergeKernel {
     MergeKernel(MergeTask task) throws IOException {
         this.task = task;
         this.alleleChecker = this.task.getAlleleChecker();
+        this.convert2Biallelic = this.task.isConvertToBiallelic();
+        this.managers = this.task.getManagers().clone();
 
-        // sort managers (large -> small)
         if (this.alleleChecker != null) {
-            // 在检查 allele frequency 的情况下需要进行排序
-            this.task.getManagers().sort((o1, o2) -> -Integer.compare(o1.getSubjectNum(), o2.getSubjectNum()));
+            // sort managers (large -> small)
+            this.managers.sort((o1, o2) -> -Integer.compare(o1.getSubjectNum(), o2.getSubjectNum()));
+            fileQueue = new ArrayDeque<>();
         } else {
-            // 其余情况
-            if (this.task.getManagers().size() > 2) {
-                // 一次性输入多个文件时，样本最少的位点具有最高的优先级（减少重复压缩次数）
-                this.task.getManagers().sort(Comparator.comparingInt(GTBManager::getSubjectNum));
-            }
+            // 其余情况, 使用最小堆
+            fileQueue = new PriorityQueue<>(Comparator.comparingInt(GTBManager::getSubjectNum));
         }
+
+        // 往队列中添加所有的文件
+        fileQueue.addAll(this.managers);
 
         // 记录坐标
         this.loadInChromosomes = recordChromosome();
@@ -81,44 +85,36 @@ class MergeKernel {
         new MergeKernel(task);
     }
 
-    HashSet<String>[] recordChromosome() {
+    HashSet<Integer> recordChromosome() {
         // 记录坐标，如果坐标太多，可以考虑分染色体读取 (使用 reader.limit 语句)
-        HashSet<String>[] loadInChromosomes = new HashSet[this.task.getManagers().size()];
-
-        for (int i = 0; i < this.task.getManagers().size(); i++) {
-            loadInChromosomes[i] = new HashSet<>();
-            for (int chromosome : this.task.getManager(i).getChromosomeList()) {
-                loadInChromosomes[i].add(ChromosomeInfo.getString(chromosome));
-            }
-        }
+        HashSet<Integer> loadInChromosomes = new HashSet<>();
 
         if (this.task.isKeepAll()) {
             // 合并所有坐标
-            for (int i = 1; i < this.task.getManagers().size(); i++) {
-                loadInChromosomes[i].addAll(loadInChromosomes[i - 1]);
+            for (GTBManager manager : this.managers) {
+                loadInChromosomes.addAll(ArrayUtils.toArrayList(manager.getChromosomeList()));
             }
         } else {
-            // 取交集 (先对所有文件都取交集)
-            int lastIndex = this.task.getManagers().size() - 1;
-            for (int i = 0; i < lastIndex; i++) {
-                // 先在染色体水平取交集
-                loadInChromosomes[lastIndex].retainAll(loadInChromosomes[i]);
-                loadInChromosomes[i] = loadInChromosomes[lastIndex];
+            // 取交集 (先保留第一个文件的染色体)
+            loadInChromosomes.addAll(ArrayUtils.toArrayList(managers.get(0).getChromosomeList()));
+
+            for (GTBManager manager : this.managers) {
+                loadInChromosomes.retainAll(ArrayUtils.toArrayList(manager.getChromosomeList()));
             }
         }
 
         return loadInChromosomes;
     }
 
-    HashSet<Integer> recordPosition(GTBReader reader1, GTBReader reader2, String chromosome) throws IOException {
+    HashSet<Integer> recordPosition(GTBReader reader1, GTBReader reader2, int chromosomeIndex) throws IOException {
         if (this.task.isKeepAll()) {
             return null;
         } else {
             HashSet<Integer> loadInPosition1 = new HashSet<>();
 
             reader1 = new GTBReader(reader1.getManager(), this.task.isPhased(), false);
-            reader1.limit(chromosome);
-            reader1.seek(chromosome, 0);
+            reader1.limit(chromosomeIndex);
+            reader1.seek(chromosomeIndex, 0);
 
             // 先加载第一个文件全部的位点
             for (Variant variant : reader1) {
@@ -129,8 +125,8 @@ class MergeKernel {
 
             // 再移除第二个文件中没有的位点
             reader2 = new GTBReader(reader2.getManager(), this.task.isPhased(), false);
-            reader2.limit(chromosome);
-            reader2.seek(chromosome, 0);
+            reader2.limit(chromosomeIndex);
+            reader2.seek(chromosomeIndex, 0);
 
             HashSet<Integer> loadInPosition2 = new HashSet<>();
             for (Variant variant : reader2) {
@@ -156,29 +152,24 @@ class MergeKernel {
     void startWithAlleleCheck() throws IOException {
         // 校正等位基因
         int index = 0;
-        while (index + 1 < this.task.getManagers().size()) {
-            GTBReader reader1;
-            if (index == 0) {
-                reader1 = new GTBReader(this.task.getManager(0), this.task.isPhased());
-            } else {
-                reader1 = new GTBReader(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp", this.task.isPhased());
-            }
+        while (fileQueue.size() > 1) {
+            GTBReader reader1 = new GTBReader(fileQueue.poll(), this.task.isPhased());
+            GTBReader reader2 = new GTBReader(fileQueue.poll(), this.task.isPhased());
 
-            GTBReader reader2 = new GTBReader(this.task.getManager(index + 1), this.task.isPhased());
-            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index) + ".~$temp");
+            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index++) + ".~$temp");
             writerBuilder.setPhased(this.task.isPhased());
             writerBuilder.setSubject(ArrayUtils.merge(reader1.getAllSubjects(), reader2.getAllSubjects()));
             writerBuilder.setReference(reader1.getManager().getReference());
             // 最后一个文件之前都使用快速压缩模式
-            if (index + 2 == this.task.getManagers().size()) {
+            if (fileQueue.size() == 0) {
                 writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
                 writerBuilder.setReordering(this.task.isReordering());
                 writerBuilder.setWindowSize(this.task.getWindowSize());
             } else {
+                writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
                 writerBuilder.setCompressor(0, 3);
                 writerBuilder.setReordering(false);
             }
-            writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
             writerBuilder.setThreads(this.task.getThreads());
             GTBWriter writer = writerBuilder.build();
 
@@ -196,26 +187,30 @@ class MergeKernel {
             mergeVariant1.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
             mergeVariant2.BEGs = new byte[manager1.getSubjectNum() + manager2.getSubjectNum()];
 
+            this.alleleChecker.setReader(reader1.getManager(), reader2.getManager());
+
             for (int i = 0; i < 1; i++) {
                 variants1Cache.add(new Variant());
                 variants2Cache.add(new Variant());
             }
 
-            for (String chromosome : loadInChromosomes[index + 1]) {
+            for (int chromosomeIndex : loadInChromosomes) {
                 boolean condition1 = false;
                 boolean condition2 = false;
-                HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
+                HashSet<Integer> position = recordPosition(reader1, reader2, chromosomeIndex);
 
-                if (manager1.contain(chromosome)) {
-                    reader1.limit(chromosome);
-                    reader1.seek(chromosome, 0);
+                this.alleleChecker.setPosition(position);
+
+                if (manager1.contain(chromosomeIndex)) {
+                    reader1.limit(chromosomeIndex);
+                    reader1.seek(chromosomeIndex, 0);
                     variants1 = reader1.readVariants(variants1Cache, position);
                     condition1 = variants1 != null;
                 }
 
-                if (manager2.contain(chromosome)) {
-                    reader2.limit(chromosome);
-                    reader2.seek(chromosome, 0);
+                if (manager2.contain(chromosomeIndex)) {
+                    reader2.limit(chromosomeIndex);
+                    reader2.seek(chromosomeIndex, 0);
                     variants2 = reader2.readVariants(variants2Cache, position);
                     condition2 = variants2 != null;
                 }
@@ -309,9 +304,7 @@ class MergeKernel {
                                 // 只有一个位点，直接合并
                                 Variant variant1 = variants1.get(0);
                                 Variant variant2 = variants2.get(0);
-                                if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                    writer.write(mergeVariant);
-                                }
+                                mergeVariantWithAlleleCheckAndWriteToFile(variant1, variant2, mergeVariant, writer);
                             } else {
                                 // 多对多 (先找一致项，不一致的再进行匹配)
                                 SmartList<Variant> variants1new = new SmartList<>();
@@ -324,9 +317,7 @@ class MergeKernel {
                                         if ((Arrays.equals(variant1.REF, variant2.REF) && Arrays.equals(variant1.ALT, variant2.ALT)) ||
                                                 (Arrays.equals(variant1.REF, variant2.ALT) && Arrays.equals(variant1.ALT, variant2.REF))) {
                                             // 基本逻辑: 完全一致的碱基序列的位点直接合并，并且只合并一次
-                                            if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                                writer.write(mergeVariant);
-                                            }
+                                            mergeVariantWithAlleleCheckAndWriteToFile(variant1, variant2, mergeVariant, writer);
                                             variants2.remove(variant2);
                                             variants2Cache.add(variant2);
                                             continue out;
@@ -376,9 +367,7 @@ class MergeKernel {
                                             Variant variant1 = variants1new.get(i);
                                             if (variants2.size() > 0) {
                                                 Variant variant2 = variants2.popFirst();
-                                                if (mergeVariantWithAlleleCheck(variant1, variant2, mergeVariant) != null) {
-                                                    writer.write(mergeVariant);
-                                                }
+                                                mergeVariantWithAlleleCheckAndWriteToFile(variant1, variant2, mergeVariant, writer);
                                                 variants2Cache.add(variant2);
                                                 continue;
                                             }
@@ -412,42 +401,47 @@ class MergeKernel {
             reader2.close();
             writer.close();
 
-            // 删除上一个临时文件
-            if (index > 0) {
-                FileUtils.delete(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp");
+            // 添加生成的文件
+            if (fileQueue instanceof ArrayDeque) {
+                ((ArrayDeque<GTBManager>) fileQueue).addFirst(GTBRootCache.get(writerBuilder.getOutputFileName()));
+            } else {
+                fileQueue.add(GTBRootCache.get(writerBuilder.getOutputFileName()));
             }
-            index++;
+
+            if (reader1.getManager().getFileName().endsWith(".~$temp")) {
+                FileUtils.delete(reader1.getManager().getFileName());
+            }
+
+            if (reader2.getManager().getFileName().endsWith(".~$temp")) {
+                FileUtils.delete(reader2.getManager().getFileName());
+            }
         }
 
         // 最后把文件名改为最终文件名
-        FileUtils.rename(this.task.getOutputFileName() + "." + (this.task.getManagers().size() - 2) + ".~$temp", this.task.getOutputFileName());
+        assert this.fileQueue.size() > 0;
+        FileUtils.rename(this.fileQueue.poll().getFileName(), this.task.getOutputFileName());
     }
 
     void startWithoutAlleleCheck() throws IOException {
         int index = 0;
-        while (index + 1 < this.task.getManagers().size()) {
-            GTBReader reader1;
-            if (index == 0) {
-                reader1 = new GTBReader(this.task.getManager(0), this.task.isPhased());
-            } else {
-                reader1 = new GTBReader(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp", this.task.isPhased());
-            }
+        while (fileQueue.size() > 1) {
+            GTBReader reader1 = new GTBReader(fileQueue.poll(), this.task.isPhased());
+            GTBReader reader2 = new GTBReader(fileQueue.poll(), this.task.isPhased());
 
-            GTBReader reader2 = new GTBReader(this.task.getManager(index + 1), this.task.isPhased());
-            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index) + ".~$temp");
+            GTBWriterBuilder writerBuilder = new GTBWriterBuilder(this.task.getOutputFileName() + "." + (index++) + ".~$temp");
             writerBuilder.setPhased(this.task.isPhased());
             writerBuilder.setSubject(ArrayUtils.merge(reader1.getAllSubjects(), reader2.getAllSubjects()));
             writerBuilder.setReference(reader1.getManager().getReference());
             // 最后一个文件之前都使用快速压缩模式
-            if (index + 2 == this.task.getManagers().size()) {
+            if (fileQueue.size() == 0) {
                 writerBuilder.setCompressor(this.task.getCompressor(), this.task.getCompressionLevel());
                 writerBuilder.setReordering(this.task.isReordering());
                 writerBuilder.setWindowSize(this.task.getWindowSize());
             } else {
+                writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
                 writerBuilder.setCompressor(0, 3);
                 writerBuilder.setReordering(false);
             }
-            writerBuilder.setBlockSizeType(this.task.getBlockSizeType());
             writerBuilder.setThreads(this.task.getThreads());
             GTBWriter writer = writerBuilder.build();
 
@@ -470,21 +464,21 @@ class MergeKernel {
                 variants2Cache.add(new Variant());
             }
 
-            for (String chromosome : loadInChromosomes[index + 1]) {
+            for (int chromosomeIndex : loadInChromosomes) {
                 boolean condition1 = false;
                 boolean condition2 = false;
-                HashSet<Integer> position = recordPosition(reader1, reader2, chromosome);
+                HashSet<Integer> position = recordPosition(reader1, reader2, chromosomeIndex);
 
-                if (manager1.contain(chromosome)) {
-                    reader1.limit(chromosome);
-                    reader1.seek(chromosome, 0);
+                if (manager1.contain(chromosomeIndex)) {
+                    reader1.limit(chromosomeIndex);
+                    reader1.seek(chromosomeIndex, 0);
                     variants1 = reader1.readVariants(variants1Cache, position);
                     condition1 = variants1 != null;
                 }
 
-                if (manager2.contain(chromosome)) {
-                    reader2.limit(chromosome);
-                    reader2.seek(chromosome, 0);
+                if (manager2.contain(chromosomeIndex)) {
+                    reader2.limit(chromosomeIndex);
+                    reader2.seek(chromosomeIndex, 0);
                     variants2 = reader2.readVariants(variants2Cache, position);
                     condition2 = variants2 != null;
                 }
@@ -675,18 +669,28 @@ class MergeKernel {
             reader2.close();
             writer.close();
 
-            // 删除上一个临时文件
-            if (index > 0) {
-                FileUtils.delete(this.task.getOutputFileName() + "." + (index - 1) + ".~$temp");
+            // 添加生成的文件
+            if (fileQueue instanceof ArrayDeque) {
+                ((ArrayDeque<GTBManager>) fileQueue).addFirst(GTBRootCache.get(writerBuilder.getOutputFileName()));
+            } else {
+                fileQueue.add(GTBRootCache.get(writerBuilder.getOutputFileName()));
             }
-            index++;
+
+            if (reader1.getManager().getFileName().endsWith(".~$temp")) {
+                FileUtils.delete(reader1.getManager().getFileName());
+            }
+
+            if (reader2.getManager().getFileName().endsWith(".~$temp")) {
+                FileUtils.delete(reader2.getManager().getFileName());
+            }
         }
 
         // 最后把文件名改为最终文件名
-        FileUtils.rename(this.task.getOutputFileName() + "." + (this.task.getManagers().size() - 2) + ".~$temp", this.task.getOutputFileName());
+        assert this.fileQueue.size() > 0;
+        FileUtils.rename(this.fileQueue.poll().getFileName(), this.task.getOutputFileName());
     }
 
-    Variant mergeVariantWithAlleleCheck(Variant variant1, Variant variant2, Variant target) {
+    void mergeVariantWithAlleleCheckAndWriteToFile(Variant variant1, Variant variant2, Variant target, GTBWriter writer) throws IOException {
         int AC12 = variant1.getAC();
         int AN1 = variant1.getAN();
         int AC11 = AN1 - AC12;
@@ -719,7 +723,7 @@ class MergeKernel {
             byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
             byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
             if (Arrays.equals(variant1.REF, variant2.REF)) {
-                if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                     variant2.REF = variant2.ALT;
                     variant2.ALT = variant1.REF;
                     variant1.ALT = variant2.REF;
@@ -729,7 +733,7 @@ class MergeKernel {
                     AC = AC22;
                 }
             } else if (Arrays.equals(variant1.REF, variant2.ALT)) {
-                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                     variant2.ALT = variant2.REF;
                     variant2.REF = variant1.REF;
                     variant1.ALT = variant2.ALT;
@@ -738,12 +742,12 @@ class MergeKernel {
                     variant1.ALT = variant2.REF;
                     AC = AC21;
                 }
-            } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+            } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                 variant2.REF = variant1.REF;
                 variant2.ALT = inverseAlleleVariant2ALT;
                 variant1.ALT = variant2.ALT;
                 AC = AC22;
-            } else if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+            } else if (alleleNum2 == 2 && Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                 variant2.ALT = variant1.REF;
                 variant2.REF = inverseAlleleVariant2REF;
                 variant1.ALT = variant2.REF;
@@ -760,7 +764,7 @@ class MergeKernel {
             byte[] inverseAlleleVariant1ALT = getInverseAllele(variant1.ALT);
             byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
             if (Arrays.equals(variant2.REF, variant1.REF)) {
-                if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                     variant2.REF = variant1.ALT;
                     variant2.ALT = variant1.REF;
                     AC = AC12 + AC21;
@@ -769,7 +773,7 @@ class MergeKernel {
                     AC = AC12;
                 }
             } else if (Arrays.equals(variant2.REF, variant1.ALT)) {
-                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                     variant2.REF = variant1.REF;
                     variant2.ALT = variant1.ALT;
                     AC = AC12;
@@ -777,11 +781,11 @@ class MergeKernel {
                     variant2.ALT = variant1.REF;
                     AC = AC12 + AC21;
                 }
-            } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+            } else if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                 variant2.REF = variant1.REF;
                 variant2.ALT = variant1.ALT;
                 AC = AC12;
-            } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+            } else if (alleleNum1 == 2 && Arrays.equals(variant2.REF, inverseAlleleVariant1ALT) && alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                 variant2.REF = variant1.ALT;
                 variant2.ALT = variant1.REF;
                 AC = AC12 + AC21;
@@ -799,13 +803,13 @@ class MergeKernel {
                 byte[] inverseAlleleVariant2ALT = getInverseAllele(variant2.ALT);
                 byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
                 if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF) && Arrays.equals(variant1.ALT, inverseAlleleVariant2ALT)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = variant1.ALT;
                         AC = AC12 + AC22;
                     }
                 } else if (Arrays.equals(variant1.REF, inverseAlleleVariant2ALT) && Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.REF = variant1.ALT;
                         variant2.ALT = variant1.REF;
                         AC = AC12 + AC21;
@@ -816,13 +820,13 @@ class MergeKernel {
             } else if (alleleNum1 == 2) {
                 byte[] inverseAlleleVariant2REF = getInverseAllele(variant2.REF);
                 if (Arrays.equals(variant1.REF, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC12 + AC22;
                     }
                 } else if (Arrays.equals(variant1.ALT, inverseAlleleVariant2REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.REF = variant1.ALT;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                     }
@@ -832,13 +836,13 @@ class MergeKernel {
             } else if (alleleNum2 == 2) {
                 byte[] inverseAlleleVariant1REF = getInverseAllele(variant1.REF);
                 if (Arrays.equals(variant2.REF, inverseAlleleVariant1REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC12 + AC22;
                     }
                 } else if (Arrays.equals(variant2.ALT, inverseAlleleVariant1REF)) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC22, AC21)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC22, AC21, true)) {
                         variant2.ALT = variant1.REF;
                         variant2.REF = getInverseAllele(variant2.REF);
                     }
@@ -848,7 +852,7 @@ class MergeKernel {
             } else {
                 // 都是多等位基因位点，只检查 ref
                 if (Arrays.equals(variant1.REF, getInverseAllele(variant2.REF))) {
-                    if (alleleChecker.isEqual(AC11, AC12, AC21, AC22)) {
+                    if (alleleChecker.isEqual(variant1, variant2, AC11, AC12, AC21, AC22, false)) {
                         variant2.REF = variant1.REF;
                         variant2.ALT = getInverseAllele(variant2.ALT);
                         AC = AC12 + AC22;
@@ -862,40 +866,65 @@ class MergeKernel {
         // 合并位点到 target
         variant1.merge(variant2, target);
 
-        if (this.variantQC.filter(null, target.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
-            return null;
-        }
+        if (this.convert2Biallelic && target.getAlternativeAlleleNum() > 2) {
+            for (Variant subVariant : target.split()) {
+                if (this.variantQC.filter(null, 2, 0, 0, 0, 0)) {
+                    return;
+                }
 
-        if (this.alleleQC.size() > 0) {
-            // 需要进行 allele QC
-            if (AC != -1) {
-                if (this.alleleQC.filter(AC, AN)) {
-                    return null;
-                } else {
-                    return target;
+                if (this.alleleQC.size() > 0 && this.alleleQC.filter(subVariant.getAC(), AN)) {
+                    return;
                 }
-            } else {
-                if (this.alleleQC.filter(target.getAC(), AN)) {
-                    return null;
-                } else {
-                    return target;
-                }
+
+                writer.write(subVariant);
             }
         } else {
-            return target;
+            if (this.variantQC.filter(null, target.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
+                return;
+            }
+
+            if (this.alleleQC.size() > 0) {
+                // 需要进行 allele QC
+                if (AC != -1) {
+                    if (!this.alleleQC.filter(AC, AN)) {
+                        writer.write(target);
+                    }
+                } else {
+                    if (!this.alleleQC.filter(target.getAC(), AN)) {
+                        writer.write(target);
+                    }
+                }
+            } else {
+                writer.write(target);
+            }
         }
     }
 
     void writeToFile(Variant variant, GTBWriter writer) throws IOException {
-        if (this.variantQC.filter(null, variant.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
-            return;
-        }
+        if (this.convert2Biallelic && variant.getAlternativeAlleleNum() > 2) {
+            int AN = variant.getAN();
+            for (Variant subVariant : variant.split()) {
+                if (this.variantQC.filter(null, 2, 0, 0, 0, 0)) {
+                    return;
+                }
 
-        if (this.alleleQC.size() > 0 && this.alleleQC.filter(variant.getAC(), variant.getAN())) {
-            return;
-        }
+                if (this.alleleQC.size() > 0 && this.alleleQC.filter(subVariant.getAC(), AN)) {
+                    return;
+                }
 
-        writer.write(variant);
+                writer.write(subVariant);
+            }
+        } else {
+            if (this.variantQC.filter(null, variant.getAlternativeAlleleNum(), 0, 0, 0, 0)) {
+                return;
+            }
+
+            if (this.alleleQC.size() > 0 && this.alleleQC.filter(variant.getAC(), variant.getAN())) {
+                return;
+            }
+
+            writer.write(variant);
+        }
     }
 
     byte[] getInverseAllele(byte[] allele) {

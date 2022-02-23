@@ -176,7 +176,7 @@ enum LDParser {
                 .convertTo(params -> {
                     RangeWithIndexConverter converter = new RangeWithIndexConverter();
                     String[] range = converter.convert(params);
-                    return new int[]{ChromosomeInfo.getIndex(range[0]), range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2])};
+                    return new Coordinate(range[0], range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2]));
                 })
                 .setOptionGroup("Subset Selection Options")
                 .setDescription("Calculate the LD by specified position range.")

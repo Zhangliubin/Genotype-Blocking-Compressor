@@ -482,6 +482,14 @@ public class LDTask implements ITask {
 
     @Override
     public String autoGenerateOutputFileName() {
-        return FileUtils.fixExtension(this.manager.getFileName(), this.outputParam.toBGZF ? LdModel.getExtension() + ".gz" : LdModel.getExtension(), ".vcf.gz.gtb", ".vcf.gtb", ".gz.gtb", ".gtb");
+        String modelName;
+        if (this.LdModel instanceof GenotypeLD) {
+            modelName = GenotypeLD.GENOTYPE_LD.getExtension();
+        } else if (this.LdModel instanceof HaplotypeLD) {
+            modelName = HaplotypeLD.HAPLOTYPE_LD.getExtension();
+        } else {
+            throw new UnsupportedOperationException(this.LdModel.toString());
+        }
+        return FileUtils.fixExtension(this.manager.getFileName(), this.outputParam.toBGZF ? modelName + ".gz" : modelName, ".vcf.gz.gtb", ".vcf.gtb", ".gz.gtb", ".gtb");
     }
 }

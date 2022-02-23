@@ -319,7 +319,6 @@ public class BuildTask extends IBuildTask {
     /**
      * 运行，并发控制
      */
-    @Override
     public void submit() throws IOException {
         synchronized (this) {
             if (this.outputFileName == null) {

@@ -38,4 +38,15 @@ public class Chromosome {
         this.length = length > 0 ? length : -1;
         this.reference = reference;
     }
+
+    @Override
+    public String toString() {
+        return "Chromosome{" +
+                "chromosomeIndex=" + chromosomeIndex +
+                ", chromosomeString='" + chromosomeString + '\'' +
+                ", ploidy=" + ploidy +
+                ", length=" + length +
+                ", reference='" + reference + '\'' +
+                '}';
+    }
 }

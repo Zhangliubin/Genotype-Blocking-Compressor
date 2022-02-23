@@ -110,13 +110,13 @@ enum ExtractFunction {
             // 根据子模型进行相应的工作
             if (options.isPassedIn("--range")) {
                 // 按照位置访问
-                int[] range = (int[]) options.get("--range");
-                task.decompressByRange(range[0], range[1], range[2]);
+                Coordinate range = (Coordinate) options.get("--range");
+                task.decompressByRange(range.chromosome, range.startPos, range.endPos);
             } else if (options.isPassedIn("--random")) {
                 // 随机提取数据
-                task.decompressByPosition((HashMap<Integer, int[]>) options.get("--random"));
+                task.decompressByPosition((HashMap<String, int[]>) options.get("--random"));
             } else if (options.isPassedIn("--node")) {
-                task.decompressByNodeIndex((HashMap<Integer, int[]>) options.get("--node"));
+                task.decompressByNodeIndex((HashMap<String, int[]>) options.get("--node"));
             } else {
                 // 解压全部
                 task.decompressAll();

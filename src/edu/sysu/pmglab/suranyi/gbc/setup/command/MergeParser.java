@@ -19,12 +19,18 @@ import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.ITask;
 import edu.sysu.pmglab.suranyi.gbc.core.build.BlockSizeParameter;
+import edu.sysu.pmglab.suranyi.gbc.core.build.BuildTask;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.LDTestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleACController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleAFController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleANController;
+import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.IAlleleQC;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.switcher.ISwitcher;
+
+import java.io.IOException;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
 import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.AT_MOST_ONE;
@@ -71,26 +77,6 @@ enum MergeParser {
                 .convertTo(new StringArrayConverter())
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
                 .setOptionGroup("Options");
-        parser.register("--check-allele")
-                .arity(0)
-                .convertTo(new PassedInConverter())
-                .setOptionGroup("Check Complementary Strand")
-                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
-        parser.register("--p-value")
-                .arity(1)
-                .convertTo(new DoubleConverter())
-                .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
-                .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Check Complementary Strand")
-                .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
-                .setFormat("'--p-value <float, 0.000001~0.5>'");
-        parser.register("--freq-gap")
-                .arity(1)
-                .convertTo(new DoubleConverter())
-                .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Check Complementary Strand")
-                .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
-                .setFormat("'--freq-gap <float, 0.000001~0.5>'");
         parser.register("--contig")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -113,6 +99,11 @@ enum MergeParser {
                 .setOptionGroup("Compressor Options")
                 .setDescription("Method for handing coordinates in different files (union or intersection), the missing genotype is replaced by '.'.")
                 .setFormat("'-m [union/intersection]'");
+        parser.register("--biallelic")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Compressor Options")
+                .setDescription("Split multiallelic variants into multiple biallelic variants.");
         parser.register("--output", "-o")
                 .arity(1)
                 .convertTo(new StringConverter())
@@ -192,6 +183,63 @@ enum MergeParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
+        parser.register("--check-allele")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("Correct for potential complementary strand errors based on allele labels (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+        parser.register("--p-value")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("Correct allele labels of rare variants (minor allele frequency < --maf) with the p-value of chi^2 test >= --p-value.")
+                .setFormat("'--p-value <float, 0.000001~0.5>'");
+        parser.register("--freq-gap")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .validateWith(new RangeValidator(1e-6, 0.5))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("Correct allele labels of rare variants (minor allele frequency < --maf) with the allele frequency gap >= --freq-gap.")
+                .setFormat("'--freq-gap <float, 0.000001~0.5>'");
+        parser.register("--no-ld")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("By default, correct allele labels of common variants (minor allele frequency >= --maf) using the ld pattern in different files. Disable this function with option '--no-ld'.");
+        parser.register("--min-r")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(LDTestChecker.DEFAULT_R_VALUE)
+                .validateWith(new RangeValidator(0.5, 1.0))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("Exclude pairs with genotypic LD correlation |R| values less than --min-r.")
+                .setFormat("'--min-r <float, 0.5~1.0>'");
+        parser.register("--flip-scan-threshold")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(LDTestChecker.DEFAULT_ALPHA)
+                .validateWith(new RangeValidator(0.5, 1.0))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("Variants with flipped ld patterns (strong correlation coefficients of opposite signs) that >= threshold ratio will be corrected.")
+                .setFormat("'--flip-scan-threshold <float, 0.5~1.0>'");
+        parser.register("--maf")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(AlleleChecker.DEFAULT_MAF)
+                .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("For common variants (minor allele frequency >= --maf) use LD to identify inconsistent allele labels.")
+                .setFormat("'--maf <float, 0~1>'");
+        parser.register("--window-bp", "-bp")
+                .arity(1)
+                .convertTo(new IntConverter())
+                .defaultTo(LDTestChecker.DEFAULT_WINDOW_SIZE_BP)
+                .validateWith(new RangeValidator(1, Integer.MAX_VALUE))
+                .setOptionGroup("Identify Inconsistent Allele Labels Options")
+                .setDescription("The maximum number of physical bases between the variants being calculated for LD.")
+                .setFormat("'-bp <int>' (>=1)");
         parser.register("--seq-ac")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
@@ -230,6 +278,46 @@ enum MergeParser {
         parser.registerRule("--level", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--check-allele", "--freq-gap", PRECONDITION);
         parser.registerRule("--check-allele", "--p-value", PRECONDITION);
+        parser.registerRule("--check-allele", "--no-ld", PRECONDITION);
+        parser.registerRule("--check-allele", "--min-r", PRECONDITION);
+        parser.registerRule("--check-allele", "--flip-scan-threshold", PRECONDITION);
+        parser.registerRule("--check-allele", "--maf", PRECONDITION);
+        parser.registerRule("--check-allele", "--window-bp", PRECONDITION);
         parser.registerRule("--p-value", "--freq-gap", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--min-r", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--flip-scan-threshold", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--window-bp", AT_MOST_ONE);
+    }
+
+    public static void main(String[] args) throws IOException {
+// 压缩 assoc.hg19.vcf.gz 文件, 设置为有向，并自定义过滤器
+        BuildTask task = new BuildTask("./example/assoc.hg19.vcf.gz");
+        task.setPhased(true);
+        task.addAlleleQC(new IAlleleQC() {
+            @Override
+            public boolean filter(int alleleCount, int validAllelesNum) {
+                float alleleFreq = (float) alleleCount / validAllelesNum;
+                // compress variants with 0 < MAF < 0.05
+                return !((alleleFreq > 0 && alleleFreq < 0.05) || (alleleFreq < 1 && alleleFreq > 0.95));
+            }
+
+            @Override
+            public boolean empty() {
+                return false;
+            }
+        });
+        task.submit();
+
+// 压缩 1000GP3 分群体文件夹
+        for (String population : new String[]{"AFR", "AMR", "EAS", "EUR", "SAS"}) {
+            task = new BuildTask("./example/1000GP3/" + population);
+            task.submit();
+        }
+
+// 压缩 batchAll 文件，并设置质控参数为 gq >= 5, dp >= 30
+        task = new BuildTask("./example/batch.all", "./example/batch.all.filterGQ5_DP30.gtb")
+                .setGenotypeQualityControlDp(30)
+                .setGenotypeQualityControlGq(5);
+        task.submit();
     }
 }

@@ -6,9 +6,11 @@ import edu.sysu.pmglab.suranyi.container.VolumeByteStream;
 import edu.sysu.pmglab.suranyi.easytools.ArrayUtils;
 import edu.sysu.pmglab.suranyi.easytools.ByteCode;
 import edu.sysu.pmglab.suranyi.gbc.coder.BEGTransfer;
+import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.coder.decoder.BEGDecoder;
 import edu.sysu.pmglab.suranyi.gbc.coder.encoder.BEGEncoder;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
+import edu.sysu.pmglab.suranyi.gbc.core.calculation.ld.ILDModel;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GTBComponentException;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.gtbreader.formatter.*;
 
@@ -53,7 +55,12 @@ public class Variant {
      * @param variants 等位基因列表
      */
     public static Variant join(SmartList<Variant> variants) {
-        Assert.that(variants.size() > 0);
+        Assert.NotEmpty(variants);
+
+        if (variants.size() == 1) {
+            return new Variant(variants.get(0));
+        }
+
         Variant targetVariant = new Variant();
         Variant firstVariant = variants.get(0);
 
@@ -66,7 +73,8 @@ public class Variant {
 
         // 转换编码表
         int[][] transCode = new int[variants.size()][];
-        SmartList<byte[]> newALt = new SmartList<>();
+        SmartList<byte[]> newALT = new SmartList<>();
+        newALT.add(targetVariant.REF);
 
         for (int i = 0; i < variants.size(); i++) {
             Variant variant = variants.get(i);
@@ -87,21 +95,25 @@ public class Variant {
             transCode[i] = new int[ACs.length];
 
             out:
-            for (int j = 1; j < ACs.length; j++) {
+            for (int j = 0; j < ACs.length; j++) {
                 if (ACs[j] > 0) {
                     byte[] allelej = variant.getAllele(j);
-                    for (int k = 0; k < newALt.size(); k++) {
-                        if (Arrays.equals(newALt.get(k), allelej)) {
-                            transCode[i][j] = k + 1;
+                    for (int k = 0; k < newALT.size(); k++) {
+                        if (Arrays.equals(newALT.get(k), allelej)) {
+                            transCode[i][j] = k;
                             continue out;
                         }
                     }
 
                     // 没有找到，说明是新的 alt
-                    newALt.add(allelej);
-                    transCode[i][j] = (byte) (newALt.size());
+                    newALT.add(allelej);
+                    transCode[i][j] = (byte) (newALT.size() - 1);
                 }
             }
+        }
+
+        if (newALT.size() > CoderConfig.MAX_ALLELE_NUM) {
+            throw new GTBComponentException("variant contains too many alternative alleles (> " + (CoderConfig.MAX_ALLELE_NUM) + ")");
         }
 
         // 经过检验, 开始合并位点
@@ -181,12 +193,28 @@ public class Variant {
         }
 
         VolumeByteStream newALTCache = new VolumeByteStream();
-        for (byte[] allele : newALt) {
+        newALT.popFirst();
+        for (byte[] allele : newALT) {
             newALTCache.writeSafety(allele);
             newALTCache.writeSafety(ByteCode.COMMA);
         }
+
+        if (newALTCache.size() == 0) {
+            newALTCache.write(ByteCode.PERIOD);
+            newALTCache.write(ByteCode.COMMA);
+        }
+
         targetVariant.ALT = newALTCache.rangeOf(0, newALTCache.size() - 1);
         return targetVariant;
+    }
+
+    /**
+     * 将多个二等位基因/多等位基因位点合并为单个位点
+     *
+     * @param variants 等位基因列表
+     */
+    public static Variant join(Variant... variants) {
+        return join(new SmartList<>(variants));
     }
 
     public Variant(int chromosomeIndex, int position, String REF, String ALT, byte[] BEGs) {
@@ -357,6 +385,13 @@ public class Variant {
     /**
      * 按照新的等位基因信息转换编码
      */
+    public void resetAlleles(String newREF) {
+        resetAlleles(newREF.getBytes());
+    }
+
+    /**
+     * 按照新的等位基因信息转换编码
+     */
     public void resetAlleles(byte[] newREF, byte[] newALT) {
         if ((ArrayUtils.equal(REF, newREF) && ArrayUtils.startWiths(newALT, ALT) && ((newALT.length == ALT.length) || (newALT[ALT.length] == ByteCode.COMMA)))) {
             ALT = newALT;
@@ -372,72 +407,94 @@ public class Variant {
                 REF = newREF;
                 ALT = newALT;
             } else {
-                // 此时处理的情况复杂的多，会变成多等位基因位点
-                byte[] transCode = new byte[allelesNum];
-                VolumeByteStream finalALT = new VolumeByteStream(newALT.length + REF.length + ALT.length + 2);
-                finalALT.write(newALT);
+                // 此时处理的情况复杂的多，可能会变成多等位基因位点
+                SmartList<byte[]> newALTCache = new SmartList<>();
+                int[] ACs = this.getACs();
+                int[] transCode = new int[ACs.length];
+                newALTCache.add(newREF);
 
-                byte newAllelesNum = (byte) (ArrayUtils.valueCounts(newALT, ByteCode.COMMA) + 2);
-
-                byte[][] oldMatchers = new byte[allelesNum][];
-                byte[][] newMatchers = new byte[newAllelesNum][];
-
-                oldMatchers[0] = REF;
-                int lastPointer = 0;
-                int searchPointer = 1;
-                int alleleIndex = 1;
-
-                while (searchPointer < ALT.length) {
-                    if (ALT[searchPointer] == ByteCode.COMMA) {
-                        oldMatchers[alleleIndex++] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
-                        lastPointer = searchPointer + 1;
-                    }
-
-                    searchPointer++;
-                }
-                oldMatchers[alleleIndex] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
-
-                newMatchers[0] = newREF;
-                lastPointer = 0;
-                searchPointer = 1;
-                alleleIndex = 1;
-
-                while (searchPointer < newALT.length) {
-                    if (newALT[searchPointer] == ByteCode.COMMA) {
-                        newMatchers[alleleIndex++] = ArrayUtils.copyOfRange(newALT, lastPointer, searchPointer);
-                        lastPointer = searchPointer + 1;
-                    }
-
-                    searchPointer++;
-                }
-                newMatchers[alleleIndex] = ArrayUtils.copyOfRange(newALT, lastPointer, searchPointer);
+                // 虚拟位点
+                Variant fakeVariant = new Variant();
+                fakeVariant.REF = newREF;
+                fakeVariant.ALT = newALT;
 
                 out:
-                for (byte id1 = 0; id1 < oldMatchers.length; id1++) {
-                    for (byte id2 = 0; id2 < newMatchers.length; id2++) {
-                        if (ArrayUtils.equal(oldMatchers[id1], newMatchers[id2])) {
-                            transCode[id1] = id2;
+                for (int i = 0; i < fakeVariant.getAlternativeAlleleNum(); i++) {
+                    byte[] allelej = fakeVariant.getAllele(i);
+                    for (int j = 0; j < newALTCache.size(); j++) {
+                        if (Arrays.equals(newALTCache.get(j), allelej)) {
                             continue out;
                         }
                     }
 
-                    // 没有发现匹配的，说明是新碱基
-                    transCode[id1] = newAllelesNum++;
-                    finalALT.write(ByteCode.COMMA);
-                    finalALT.write(oldMatchers[id1]);
+                    // 没有找到，说明是新的 alt
+                    newALTCache.add(allelej);
                 }
-                REF = newREF;
-                ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
-                newMatchers = null;
-                oldMatchers = null;
-                finalALT = null;
+
+                // 扫描 allele
+                out:
+                for (int i = 0; i < ACs.length; i++) {
+                    if (ACs[i] > 0) {
+                        byte[] allelej = getAllele(i);
+                        for (int j = 0; j < newALTCache.size(); j++) {
+                            if (Arrays.equals(newALTCache.get(j), allelej)) {
+                                transCode[i] = j;
+                                continue out;
+                            }
+                        }
+
+                        // 没有找到，说明是新的 alt
+                        newALTCache.add(allelej);
+                        transCode[i] = (byte) (newALTCache.size() - 1);
+                    }
+                }
+
+                if (newALTCache.size() > CoderConfig.MAX_ALLELE_NUM) {
+                    throw new GTBComponentException("variant contains too many alternative alleles (> " + (CoderConfig.MAX_ALLELE_NUM) + ")");
+                }
+
+                // 经过检验, 开始合并位点
+                VolumeByteStream cache = new VolumeByteStream();
+                newALTCache.popFirst();
+                for (byte[] allele : newALTCache) {
+                    cache.writeSafety(allele);
+                    cache.writeSafety(ByteCode.COMMA);
+                }
+
+                if (newALTCache.size() == 0) {
+                    cache.write(ByteCode.PERIOD);
+                    cache.write(ByteCode.COMMA);
+                }
+
+                this.REF = newREF;
+                this.ALT = cache.rangeOf(0, cache.size() - 1);
 
                 // 转换编码
-                BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
-                for (int i = 0; i < this.BEGs.length; i++) {
-                    BEGs[i] = BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, BEGs[i])]);
+                boolean fastMode = true;
+                for (int i = 0; i < ACs.length; i++) {
+                    if (ACs[i] != i) {
+                        // 如果映射关系没有改变, 则为快速模式
+                        fastMode = false;
+                        break;
+                    }
+                }
+
+                if (!fastMode) {
+                    BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
+                    for (int i = 0; i < this.BEGs.length; i++) {
+                        BEGs[i] = BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, BEGs[i])]);
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * 按照新的等位基因信息转换编码
+     */
+    public void resetAlleles(byte[] newREF) {
+        if (!newREF.equals(this.REF)) {
+            resetAlleles(newREF, this.REF);
         }
     }
 
@@ -466,97 +523,14 @@ public class Variant {
      * @param verifyCoordinate 是否验证坐标
      */
     public Variant merge(final Variant otherVariant, boolean verifyCoordinate) {
-        if (verifyCoordinate && !(otherVariant.chromosome.equals(this.chromosome) && (otherVariant.position == this.position))) {
-            throw new UnsupportedOperationException("merge variant with different coordinates are not allowed");
-        }
-
-        Variant mergeVariant = new Variant();
-        mergeVariant.chromosome = this.chromosome;
-        mergeVariant.position = this.position;
-        mergeVariant.ploidy = this.ploidy;
-        mergeVariant.phased = this.phased;
-
-        // 传入位点作为主位点
-        if ((ArrayUtils.equal(REF, otherVariant.REF) && (ArrayUtils.equal(ALT, otherVariant.ALT)))) {
-            mergeVariant.REF = this.REF;
-            mergeVariant.ALT = this.ALT;
-            mergeVariant.BEGs = ArrayUtils.merge(this.BEGs, otherVariant.BEGs);
-        } else {
-            // 获取等位基因个数
-            int allelesNum = getAlternativeAlleleNum();
-
-            // 此时处理的情况复杂的多，会变成多等位基因位点
-            VolumeByteStream finalALT = new VolumeByteStream(ALT.length + otherVariant.REF.length + otherVariant.ALT.length + 2);
-            finalALT.write(ALT);
-
-            int otherAllelesNum = otherVariant.getAlternativeAlleleNum();
-            byte[] transCode = new byte[otherAllelesNum];
-
-            byte[][] oldMatchers = new byte[otherAllelesNum][];
-            byte[][] newMatchers = new byte[allelesNum][];
-
-            oldMatchers[0] = otherVariant.REF;
-            int lastPointer = 0;
-            int searchPointer = 1;
-            int alleleIndex = 1;
-
-            while (searchPointer < otherVariant.ALT.length) {
-                if (otherVariant.ALT[searchPointer] == ByteCode.COMMA) {
-                    oldMatchers[alleleIndex++] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
-                    lastPointer = searchPointer + 1;
-                }
-
-                searchPointer++;
-            }
-            oldMatchers[alleleIndex] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
-
-            newMatchers[0] = REF;
-            lastPointer = 0;
-            searchPointer = 1;
-            alleleIndex = 1;
-
-            while (searchPointer < ALT.length) {
-                if (ALT[searchPointer] == ByteCode.COMMA) {
-                    newMatchers[alleleIndex++] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
-                    lastPointer = searchPointer + 1;
-                }
-
-                searchPointer++;
-            }
-            newMatchers[alleleIndex] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
-
-            out:
-            for (byte id1 = 0; id1 < oldMatchers.length; id1++) {
-                for (byte id2 = 0; id2 < newMatchers.length; id2++) {
-                    if (ArrayUtils.equal(oldMatchers[id1], newMatchers[id2])) {
-                        transCode[id1] = id2;
-                        continue out;
-                    }
-                }
-
-                // 没有发现匹配的，说明是新碱基
-                transCode[id1] = (byte) allelesNum++;
-                finalALT.write(ByteCode.COMMA);
-                finalALT.write(oldMatchers[id1]);
-            }
-            mergeVariant.REF = this.REF;
-            mergeVariant.ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
-
-            // 转换编码
-            BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
-            mergeVariant.BEGs = new byte[this.BEGs.length + otherVariant.BEGs.length];
-            System.arraycopy(this.BEGs, 0, mergeVariant.BEGs, 0, this.BEGs.length);
-            for (int i = 0; i < otherVariant.BEGs.length; i++) {
-                mergeVariant.BEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
-            }
-        }
-        return mergeVariant;
+        return merge(otherVariant, new Variant(), verifyCoordinate);
     }
 
     /**
      * 横向合并位点 (认为它们来自不同的测序样本)
      *
      * @param otherVariant     另一个变异位点
+     * @param target           填充数据到指定的位点
      * @param verifyCoordinate 是否验证坐标
      */
     public Variant merge(final Variant otherVariant, Variant target, boolean verifyCoordinate) {
@@ -580,74 +554,99 @@ public class Variant {
                 target.BEGs = ArrayUtils.merge(this.BEGs, otherVariant.BEGs);
             }
         } else {
-            // 获取等位基因个数
-            int allelesNum = getAlternativeAlleleNum();
-
             // 此时处理的情况复杂的多，会变成多等位基因位点
-            VolumeByteStream finalALT = new VolumeByteStream(ALT.length + otherVariant.REF.length + otherVariant.ALT.length + 2);
-            finalALT.write(ALT);
+            SmartList<byte[]> newALT = new SmartList<>();
+            int[] ACs1 = this.getACs();
+            int[] ACs2 = otherVariant.getACs();
+            int[][] transCode = new int[][]{new int[ACs1.length], new int[ACs2.length]};
+            newALT.add(this.REF);
 
-            int otherAllelesNum = otherVariant.getAlternativeAlleleNum();
-            byte[] transCode = new byte[otherAllelesNum];
+            // 扫描 allele
+            out:
+            for (int i = 1; i < ACs1.length; i++) {
+                if (ACs1[i] > 0) {
+                    byte[] allelej = getAllele(i);
+                    for (int j = 0; j < newALT.size(); j++) {
+                        if (Arrays.equals(newALT.get(j), allelej)) {
+                            transCode[0][i] = j;
+                            continue out;
+                        }
+                    }
 
-            byte[][] oldMatchers = new byte[otherAllelesNum][];
-            byte[][] newMatchers = new byte[allelesNum][];
-
-            oldMatchers[0] = otherVariant.REF;
-            int lastPointer = 0;
-            int searchPointer = 1;
-            int alleleIndex = 1;
-
-            while (searchPointer < otherVariant.ALT.length) {
-                if (otherVariant.ALT[searchPointer] == ByteCode.COMMA) {
-                    oldMatchers[alleleIndex++] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
-                    lastPointer = searchPointer + 1;
+                    // 没有找到，说明是新的 alt
+                    newALT.add(allelej);
+                    transCode[0][i] = (byte) (newALT.size() - 1);
                 }
-
-                searchPointer++;
             }
-            oldMatchers[alleleIndex] = ArrayUtils.copyOfRange(otherVariant.ALT, lastPointer, searchPointer);
-
-            newMatchers[0] = REF;
-            lastPointer = 0;
-            searchPointer = 1;
-            alleleIndex = 1;
-
-            while (searchPointer < ALT.length) {
-                if (ALT[searchPointer] == ByteCode.COMMA) {
-                    newMatchers[alleleIndex++] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
-                    lastPointer = searchPointer + 1;
-                }
-
-                searchPointer++;
-            }
-            newMatchers[alleleIndex] = ArrayUtils.copyOfRange(ALT, lastPointer, searchPointer);
 
             out:
-            for (byte id1 = 0; id1 < oldMatchers.length; id1++) {
-                for (byte id2 = 0; id2 < newMatchers.length; id2++) {
-                    if (ArrayUtils.equal(oldMatchers[id1], newMatchers[id2])) {
-                        transCode[id1] = id2;
-                        continue out;
+            for (int i = 0; i < ACs2.length; i++) {
+                if (ACs2[i] > 0) {
+                    byte[] allelej = otherVariant.getAllele(i);
+                    for (int j = 0; j < newALT.size(); j++) {
+                        if (Arrays.equals(newALT.get(j), allelej)) {
+                            transCode[1][i] = j;
+                            continue out;
+                        }
                     }
-                }
 
-                // 没有发现匹配的，说明是新碱基
-                transCode[id1] = (byte) allelesNum++;
-                finalALT.write(ByteCode.COMMA);
-                finalALT.write(oldMatchers[id1]);
+                    // 没有找到，说明是新的 alt
+                    newALT.add(allelej);
+                    transCode[1][i] = (byte) (newALT.size() - 1);
+                }
             }
+
+            if (newALT.size() > CoderConfig.MAX_ALLELE_NUM) {
+                throw new GTBComponentException("variant contains too many alternative alleles (> " + (CoderConfig.MAX_ALLELE_NUM) + ")");
+            }
+
+            // 经过检验, 开始合并位点
+            VolumeByteStream newALTCache = new VolumeByteStream();
+            newALT.popFirst();
+            for (byte[] allele : newALT) {
+                newALTCache.writeSafety(allele);
+                newALTCache.writeSafety(ByteCode.COMMA);
+            }
+
+            if (newALTCache.size() == 0) {
+                newALTCache.write(ByteCode.PERIOD);
+                newALTCache.write(ByteCode.COMMA);
+            }
+
             target.REF = this.REF;
-            target.ALT = finalALT.remaining() == 0 ? finalALT.getCache() : finalALT.values();
+            target.ALT = newALTCache.rangeOf(0, newALTCache.size() - 1);
 
             // 转换编码
             BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
             if (target.BEGs.length != this.BEGs.length + otherVariant.BEGs.length) {
                 target.BEGs = new byte[this.BEGs.length + otherVariant.BEGs.length];
             }
-            System.arraycopy(this.BEGs, 0, target.BEGs, 0, this.BEGs.length);
+
+            // 尽可能不处理 variant 1 (直接拷贝)
+            int beginIndex = ArrayUtils.indexOf(ACs1, 0, 1);
+            boolean fastMode = true;
+
+            if (beginIndex != -1) {
+                // 所有的碱基都有计数值
+                for (int i = beginIndex + 1; i < ACs1.length; i++) {
+                    // 在 beginIndex 之后的全都是 0
+                    if (ACs1[i] != 0) {
+                        fastMode = false;
+                        break;
+                    }
+                }
+            }
+
+            if (fastMode) {
+                System.arraycopy(this.BEGs, 0, target.BEGs, 0, this.BEGs.length);
+            } else {
+                for (int i = 0; i < this.BEGs.length; i++) {
+                    target.BEGs[i] = this.BEGs[i] == 0 ? 0 : encoder.encode(transCode[0][BEGDecoder.decodeHaplotype(0, this.BEGs[i])], transCode[0][BEGDecoder.decodeHaplotype(1, this.BEGs[i])]);
+                }
+            }
+
             for (int i = 0; i < otherVariant.BEGs.length; i++) {
-                target.BEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
+                target.BEGs[this.BEGs.length + i] = otherVariant.BEGs[i] == 0 ? 0 : encoder.encode(transCode[1][BEGDecoder.decodeHaplotype(0, otherVariant.BEGs[i])], transCode[1][BEGDecoder.decodeHaplotype(1, otherVariant.BEGs[i])]);
             }
         }
         return target;
@@ -748,7 +747,7 @@ public class Variant {
 
         int index = 0;
         SmartList<Variant> out = new SmartList<>();
-        transCodeReverse[0] = 0;
+        transCodeReverse[index++] = 0;
 
         for (int i = 1; i < ACs.length; i++) {
             if (ACs[i] > 0) {
@@ -769,41 +768,46 @@ public class Variant {
             out.add(cacheVariant);
         } else {
             // 有多个有效等位基因时
-            BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
-            for (int i = 0; i < index; i++) {
-                Variant cacheVariant = new Variant();
-                cacheVariant.chromosome = this.chromosome;
-                cacheVariant.position = this.position;
-                cacheVariant.ploidy = this.ploidy;
-                cacheVariant.phased = this.phased;
-                cacheVariant.REF = ArrayUtils.copyOfRange(this.REF, 0, this.REF.length);
-                cacheVariant.BEGs = new byte[this.BEGs.length];
-                cacheVariant.ALT = getAllele(transCodeReverse[i]);
+            if (ACs.length == 2) {
+                // 2 等位基因位点, 直接添加自身
+                out.add(new Variant(this));
+            } else {
+                BEGEncoder encoder = BEGEncoder.getEncoder(this.phased);
+                for (int i = 1; i < index; i++) {
+                    Variant cacheVariant = new Variant();
+                    cacheVariant.chromosome = this.chromosome;
+                    cacheVariant.position = this.position;
+                    cacheVariant.ploidy = this.ploidy;
+                    cacheVariant.phased = this.phased;
+                    cacheVariant.REF = ArrayUtils.copyOfRange(this.REF, 0, this.REF.length);
+                    cacheVariant.BEGs = new byte[this.BEGs.length];
+                    cacheVariant.ALT = getAllele(transCodeReverse[i]);
 
-                for (int j = 0; j < this.BEGs.length; j++) {
-                    if (this.BEGs[j] == 0) {
-                        cacheVariant.BEGs[j] = 0;
-                    } else {
-                        int leftGenotype = BEGDecoder.decodeHaplotype(0, this.BEGs[j]);
-                        int rightGenotype = BEGDecoder.decodeHaplotype(1, this.BEGs[j]);
-
-                        if (leftGenotype == transCodeReverse[i]) {
-                            leftGenotype = 1;
+                    for (int j = 0; j < this.BEGs.length; j++) {
+                        if (this.BEGs[j] == 0) {
+                            cacheVariant.BEGs[j] = 0;
                         } else {
-                            leftGenotype = 0;
-                        }
+                            int leftGenotype = BEGDecoder.decodeHaplotype(0, this.BEGs[j]);
+                            int rightGenotype = BEGDecoder.decodeHaplotype(1, this.BEGs[j]);
 
-                        if (rightGenotype == transCodeReverse[i]) {
-                            rightGenotype = 1;
-                        } else {
-                            rightGenotype = 0;
-                        }
+                            if (leftGenotype == transCodeReverse[i]) {
+                                leftGenotype = 1;
+                            } else {
+                                leftGenotype = 0;
+                            }
 
-                        cacheVariant.BEGs[j] = encoder.encode(leftGenotype, rightGenotype);
+                            if (rightGenotype == transCodeReverse[i]) {
+                                rightGenotype = 1;
+                            } else {
+                                rightGenotype = 0;
+                            }
+
+                            cacheVariant.BEGs[j] = encoder.encode(leftGenotype, rightGenotype);
+                        }
                     }
-                }
 
-                out.add(cacheVariant);
+                    out.add(cacheVariant);
+                }
             }
         }
 
@@ -967,6 +971,28 @@ public class Variant {
                 }
             }
         }
+    }
+
+    /**
+     * 计算二等位基因位点的 LD 系数
+     *
+     * @param model   LD 计算模型
+     * @param variant 变异位点
+     * @return LD 系数计算结果
+     */
+    public double calculateLDR2(ILDModel model, Variant variant) {
+        return model.calculateLDR2(this, variant);
+    }
+
+    /**
+     * 计算二等位基因位点的 LD 系数
+     *
+     * @param model   LD 计算模型
+     * @param variant 变异位点
+     * @return LD 系数计算结果
+     */
+    public double calculateLDR(ILDModel model, Variant variant) {
+        return model.calculateLD(this, variant);
     }
 
     /**

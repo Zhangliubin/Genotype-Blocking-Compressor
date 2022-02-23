@@ -59,9 +59,15 @@ enum ShowParser {
                 .convertTo(new StringConverter())
                 .defaultTo(ChromosomeInfo.DEFAULT_FILE)
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
-                .setOptionGroup("Options")
+                .setOptionGroup("Common Options")
                 .setDescription("Specify the corresponding contig file.")
                 .setFormat("'--contig <file>'");
+        parser.register("--assign-chromosome")
+                .arity(1)
+                .convertTo(new StringArrayConverter(","))
+                .setOptionGroup("Common Options")
+                .setDescription("Print information of the specified chromosome.")
+                .setFormat("'--assign-chromosome <string>,<string>,...'");
         parser.register("--list-md5")
                 .arity(0)
                 .convertTo(new PassedInConverter())
@@ -87,12 +93,6 @@ enum ShowParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Summary View Options")
                 .setDescription("Print information of the GTBNodes.");
-        parser.register("--assign-chromosome")
-                .arity(1)
-                .convertTo(new StringArrayConverter(","))
-                .setOptionGroup("Summary View Options")
-                .setDescription("Print information of the specified chromosome nodes.")
-                .setFormat("'--assign-chromosome <string>,<string>,...'");
         parser.register("--full", "-f")
                 .arity(0)
                 .convertTo(new PassedInConverter())

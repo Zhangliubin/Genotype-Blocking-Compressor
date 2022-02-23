@@ -26,7 +26,7 @@ import java.util.Arrays;
 class LDKernel {
     final LDTask task;
     final GTBManager manager;
-    final ILDModel ldModel;
+    final ILDContext ldModel;
     final int validSampleNum;
     final int maxCacheBlockSize;
     int totalThreadsNum;
@@ -45,7 +45,13 @@ class LDKernel {
     LDKernel(LDTask task) {
         this.task = task;
         this.manager = this.task.getManager();
-        this.ldModel = this.task.LdModel;
+        if (this.task.getLdModel() instanceof GenotypeLD) {
+            this.ldModel = GenotypeLD.GENOTYPE_LD;
+        } else if (this.task.getLdModel() instanceof HaplotypeLD) {
+            this.ldModel = HaplotypeLD.HAPLOTYPE_LD;
+        } else {
+            throw new UnsupportedOperationException(this.task.getLdModel().toString());
+        }
 
         // 有效样本个数, 位点个数
         this.validSampleNum = this.task.getSubjects() == null ? this.manager.getSubjectNum() : this.task.getSubjects().size();
@@ -288,7 +294,7 @@ class LDKernel {
                                     continue out;
                                 }
 
-                                if (ldModel.calculateLD(lineCache, variant1, variant2, task.getMinR2()) != 0) {
+                                if (ldModel.calculateLDR2(lineCache, variant1, variant2, task.getMinR2()) != 0) {
                                     this.outputFile.write(localId, ByteCode.NEWLINE);
                                     this.outputFile.write(localId, lineCache);
                                 }
@@ -311,7 +317,7 @@ class LDKernel {
                                         continue out;
                                     }
 
-                                    if (ldModel.calculateLD(lineCache, variant1, variant2, task.getMinR2()) != 0) {
+                                    if (ldModel.calculateLDR2(lineCache, variant1, variant2, task.getMinR2()) != 0) {
                                         this.outputFile.write(localId, ByteCode.NEWLINE);
                                         this.outputFile.write(localId, lineCache);
                                     }
@@ -331,7 +337,7 @@ class LDKernel {
                                         property.fillBitCodes(cacheVariant);
 
                                         if (property.checkMaf(task.getMAF())) {
-                                            if (ldModel.calculateLD(lineCache, variant1, cacheVariant, task.getMinR2()) != 0) {
+                                            if (ldModel.calculateLDR2(lineCache, variant1, cacheVariant, task.getMinR2()) != 0) {
                                                 this.outputFile.write(localId, ByteCode.NEWLINE);
                                                 this.outputFile.write(localId, lineCache);
                                             }

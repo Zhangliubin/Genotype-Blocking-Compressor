@@ -7,6 +7,8 @@ import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.build.MergeTask;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleFreqTestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.LDTestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.MixChecker;
 
 import java.io.IOException;
 import java.util.Scanner;
@@ -90,15 +92,22 @@ enum MergeFunction {
             }
 
             if (options.isPassedIn("--check-allele")) {
-                if (options.isPassedIn("--freq-gap")) {
-                    task.setAlleleChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap")));
-                } else if (options.isPassedIn("--p-value")) {
-                    task.setAlleleChecker(new Chi2TestChecker((double) options.get("--p-value")));
+                if (options.isPassedIn("--no-ld")) {
+                    if (options.isPassedIn("--freq-gap")) {
+                        task.setAlleleChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap"), (double) options.get("--maf")));
+                    } else {
+                        task.setAlleleChecker(new Chi2TestChecker((double) options.get("--p-value"), (double) options.get("--maf")));
+                    }
                 } else {
-                    task.setAlleleChecker(true);
+                    if (options.isPassedIn("--freq-gap")) {
+                        task.setAlleleChecker(new MixChecker(new AlleleFreqTestChecker((double) options.get("--freq-gap"), (double) options.get("--maf")), new LDTestChecker((double) options.get("--min-r"), (double) options.get("--flip-scan-threshold"), (int) options.get("--window-bp"), (double) options.get("--maf"))));
+                    } else {
+                        task.setAlleleChecker(new MixChecker(new Chi2TestChecker((double) options.get("--p-value"), (double) options.get("--maf")), new LDTestChecker((double) options.get("--min-r"), (double) options.get("--flip-scan-threshold"), (int) options.get("--window-bp"), (double) options.get("--maf"))));
+                    }
                 }
             }
             task.setSiteMergeType((String) (options.get("--method")));
+            task.convertToBiallelic(options.isPassedIn("--biallelic"));
 
             // 输出日志
             System.out.println("INFO    Start running " + task);

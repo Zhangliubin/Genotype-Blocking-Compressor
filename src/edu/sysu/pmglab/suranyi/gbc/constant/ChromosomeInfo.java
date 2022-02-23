@@ -75,77 +75,104 @@ public enum ChromosomeInfo {
     /**
      * 从 vcf 文件中构建 contig 文件
      */
-    public static void build(String inputFileName, String outputFileName) throws IOException {
+    public static void build(String inputFileName, String outputFileName, boolean deep) throws IOException {
         Assert.that(!inputFileName.equals(outputFileName), "inputFileName = outputFileName");
 
         FileStream in = new FileStream(inputFileName, inputFileName.endsWith(".gz") ? FileOptions.BGZIP_READER : FileOptions.CHANNEL_READER);
         FileStream out = new FileStream(outputFileName, FileOptions.CHANNEL_WRITER);
 
         VolumeByteStream outputCache = new VolumeByteStream();
-
         VolumeByteStream lineCache = new VolumeByteStream();
-        boolean searchRef = true;
-        byte[] contigStartFlag = "##contig=".getBytes();
-        while (in.readLine(lineCache) != -1) {
-            if (lineCache.startWith(ByteCode.NUMBER_SIGN)) {
-                if (searchRef && lineCache.startWith(ByteCode.REFERENCE_STRING)) {
-                    out.write(lineCache);
-                    searchRef = false;
-                } else {
-                    if (lineCache.startWith(contigStartFlag)) {
-                        // 捕获 contig 信息
-                        byte[] chromosome = null;
-                        byte[] length = null;
+        boolean searchRef = false;
 
-                        for (int i = contigStartFlag.length; i < lineCache.size(); i++) {
-                            if (lineCache.startWith(i, ByteCode.ID_STRING)) {
-                                if (lineCache.startWith(i + 3, ByteCode.CHR_STRING)) {
-                                    i = i + 3;
-                                }
-                                for (int j = i + 3; j < lineCache.size(); j++) {
-                                    if (lineCache.cacheOf(j) == ByteCode.COMMA || lineCache.cacheOf(j) == 0x3e) {
-                                        chromosome = lineCache.cacheOf(i + 3, j);
-                                        break;
-                                    }
-                                }
-                            }
+        if (deep) {
+            SmartList<byte[]> chromosomes = new SmartList<>();
+            out:
+            while (in.readLine(lineCache) != -1) {
+                if (!lineCache.startWith(ByteCode.NUMBER_SIGN)) {
+                    // 不是以 # 开头
+                    byte[] chromosome = lineCache.getNBy(ByteCode.TAB, 0);
 
-                            if (lineCache.startWith(i, "length=".getBytes())) {
-                                for (int j = i + 7; j < lineCache.size(); j++) {
-                                    if (lineCache.cacheOf(j) == ByteCode.COMMA || lineCache.cacheOf(j) == 0x3e) {
-                                        length = lineCache.cacheOf(i + 7, j);
-                                        break;
-                                    }
-                                }
-                            }
+                    for (int i = 0; i < chromosomes.size(); i++) {
+                        if (Arrays.equals(chromosomes.get(i), chromosome)) {
+                            lineCache.reset();
+                            continue out;
                         }
+                    }
 
-                        if (chromosome != null) {
-                            outputCache.writeSafety(ByteCode.NEWLINE);
-                            outputCache.writeSafety(chromosome);
+                    chromosomes.add(chromosome);
+                    outputCache.writeSafety(ByteCode.NEWLINE);
+                    outputCache.writeSafety(chromosome);
+                    outputCache.writeSafety(ByteCode.COMMA);
+                    outputCache.writeSafety(ByteCode.TWO);
+                    outputCache.writeSafety(ByteCode.COMMA);
+                    outputCache.writeSafety(ByteCode.ZERO);
+                }
+                lineCache.reset();
+            }
+        } else {
+            byte[] contigStartFlag = "##contig=".getBytes();
+            while (in.readLine(lineCache) != -1) {
+                if (lineCache.startWith(ByteCode.NUMBER_SIGN)) {
+                    if (!searchRef && lineCache.startWith(ByteCode.REFERENCE_STRING)) {
+                        out.write(lineCache);
+                        searchRef = true;
+                    } else {
+                        if (lineCache.startWith(contigStartFlag)) {
+                            // 捕获 contig 信息
+                            byte[] chromosome = null;
+                            byte[] length = null;
 
-                            outputCache.writeSafety(ByteCode.COMMA);
-                            outputCache.writeSafety(ByteCode.TWO);
+                            for (int i = contigStartFlag.length; i < lineCache.size(); i++) {
+                                if (lineCache.startWith(i, ByteCode.ID_STRING)) {
+                                    if (lineCache.startWith(i + 3, ByteCode.CHR_STRING)) {
+                                        i = i + 3;
+                                    }
+                                    for (int j = i + 3; j < lineCache.size(); j++) {
+                                        if (lineCache.cacheOf(j) == ByteCode.COMMA || lineCache.cacheOf(j) == 0x3e) {
+                                            chromosome = lineCache.cacheOf(i + 3, j);
+                                            break;
+                                        }
+                                    }
+                                }
 
-                            outputCache.writeSafety(ByteCode.COMMA);
-                            if (length != null) {
-                                outputCache.writeSafety(length);
-                            } else {
-                                outputCache.writeSafety(ByteCode.ZERO);
+                                if (lineCache.startWith(i, "length=".getBytes())) {
+                                    for (int j = i + 7; j < lineCache.size(); j++) {
+                                        if (lineCache.cacheOf(j) == ByteCode.COMMA || lineCache.cacheOf(j) == 0x3e) {
+                                            length = lineCache.cacheOf(i + 7, j);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (chromosome != null) {
+                                outputCache.writeSafety(ByteCode.NEWLINE);
+                                outputCache.writeSafety(chromosome);
+
+                                outputCache.writeSafety(ByteCode.COMMA);
+                                outputCache.writeSafety(ByteCode.TWO);
+
+                                outputCache.writeSafety(ByteCode.COMMA);
+                                if (length != null) {
+                                    outputCache.writeSafety(length);
+                                } else {
+                                    outputCache.writeSafety(ByteCode.ZERO);
+                                }
                             }
                         }
                     }
+                } else {
+                    break;
                 }
-            } else {
-                break;
+                lineCache.reset();
             }
-            lineCache.reset();
         }
 
         if (searchRef) {
-            out.write("#chromosome,ploidy,length");
-        } else {
             out.write("\n#chromosome,ploidy,length");
+        } else {
+            out.write("#chromosome,ploidy,length");
         }
         out.write(outputCache);
         in.close();

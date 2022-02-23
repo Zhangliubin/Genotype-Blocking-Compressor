@@ -89,8 +89,8 @@ enum LDFunction {
             System.out.println("INFO    Start running " + task);
             long jobStart = System.currentTimeMillis();
             if (options.isPassedIn("-r")) {
-                int[] range = ((int[]) options.get("-r"));
-                task.submit(range[0], range[1], range[2]);
+                Coordinate range = (Coordinate) options.get("--range");
+                task.submit(range.chromosome, range.startPos, range.endPos);
             } else {
                 task.submit();
             }

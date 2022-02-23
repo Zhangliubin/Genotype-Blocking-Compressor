@@ -222,6 +222,8 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     pairs[i] = new IndexPair(i, i / eachGroupNum, i % eachGroupNum);
                 }
             }
+
+            this.subjectIndexes = pairs.length == 0 ? new int[0] : ArrayUtils.range(pairs.length - 1);
         } else {
             this.subjectIndexes = new int[]{};
 
@@ -264,14 +266,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                 return null;
             }
 
-            this.cache.fill(pointer, false);
+            this.cache.fill(pointer, this.pairs.length > 0);
             taskVariant = this.cache.taskVariants[pointer.variantIndex];
 
             if (condition.contains(taskVariant.position)) {
                 GTBNode node = pointer.getNode();
-                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                    this.cache.decompressGT(node, pointer, true);
-                }
                 byte[] BEGs = new byte[this.pairs.length];
                 fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
 
@@ -298,7 +297,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                 return null;
             }
 
-            this.cache.fill(pointer, false);
+            this.cache.fill(pointer, this.pairs.length > 0);
             taskVariant = this.cache.taskVariants[pointer.variantIndex];
             GTBNode node = pointer.getNode();
             boolean status = (condition.containsKey(node.chromosomeIndex) && condition.get(node.chromosomeIndex).contains(taskVariant.position));
@@ -308,10 +307,6 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             }
 
             if (status) {
-                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                    this.cache.decompressGT(node, pointer, true);
-                }
-
                 byte[] BEGs = new byte[this.pairs.length];
                 fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
 
@@ -336,15 +331,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
 
             while (pointer.chromosomeIndex != -1) {
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     byte[] BEGs = new byte[this.pairs.length];
                     fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
 
@@ -355,6 +346,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     break;
                 }
             }
+
             return variants.toArray(new Variant[]{});
         } else {
             // 不存在下一个位点，此时 返回 null
@@ -379,15 +371,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
 
             while (pointer.chromosomeIndex != -1) {
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     byte[] BEGs = new byte[this.pairs.length];
                     fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
 
@@ -421,15 +409,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             int chromosomeIndex = ChromosomeInfo.getIndex(variant.chromosome);
 
             while (pointer.chromosomeIndex != -1) {
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == variant.position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     byte[] BEGs = new byte[this.pairs.length];
                     fillBEGs(taskVariant, node, BEGs, this.phasedTransfer);
 
@@ -499,15 +483,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
         TaskVariant taskVariant;
         GTBNode node;
         while (pointer.chromosomeIndex != -1) {
-            this.cache.fill(pointer, false);
+            this.cache.fill(pointer, this.pairs.length > 0);
             taskVariant = this.cache.taskVariants[pointer.variantIndex];
             node = pointer.getNode();
 
             if (condition.contains(taskVariant.position)) {
-                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                    this.cache.decompressGT(node, pointer, true);
-                }
-
                 if (this.pairs.length != variant.BEGs.length) {
                     variant.BEGs = new byte[this.pairs.length];
                 }
@@ -554,7 +534,7 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
         TaskVariant taskVariant;
         GTBNode node;
         while (pointer.chromosomeIndex != -1) {
-            this.cache.fill(pointer, false);
+            this.cache.fill(pointer, this.pairs.length > 0);
             taskVariant = this.cache.taskVariants[pointer.variantIndex];
             node = pointer.getNode();
             boolean status = (condition.containsKey(node.chromosomeIndex) && condition.get(node.chromosomeIndex).contains(taskVariant.position));
@@ -564,10 +544,6 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
             }
 
             if (status) {
-                if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                    this.cache.decompressGT(node, pointer, true);
-                }
-
                 if (this.pairs.length != variant.BEGs.length) {
                     variant.BEGs = new byte[this.pairs.length];
                 }
@@ -634,15 +610,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant = variantCache.popFirst();
                 }
 
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     if (this.pairs.length != variant.BEGs.length) {
                         variant.BEGs = new byte[this.pairs.length];
                     }
@@ -705,15 +677,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant = variantCache.popFirst();
                 }
 
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     if (this.pairs.length != variant.BEGs.length) {
                         variant.BEGs = new byte[this.pairs.length];
                     }
@@ -777,15 +745,11 @@ public class GTBReader implements Closeable, AutoCloseable, Iterable<Variant> {
                     variant = variantCache.popFirst();
                 }
 
-                this.cache.fill(pointer, false);
+                this.cache.fill(pointer, this.pairs.length > 0);
                 taskVariant = this.cache.taskVariants[pointer.variantIndex];
                 GTBNode node = pointer.getNode();
 
                 if (chromosomeIndex == node.chromosomeIndex && taskVariant.position == position) {
-                    if (!this.cache.isGTDecompress && this.pairs.length > 0) {
-                        this.cache.decompressGT(node, pointer, true);
-                    }
-
                     if (this.pairs.length != variant.BEGs.length) {
                         variant.BEGs = new byte[this.pairs.length];
                     }

@@ -29,9 +29,9 @@ import edu.sysu.pmglab.suranyi.unifyIO.partreader.IPartReader;
 import java.io.IOException;
 
 /**
- * @Data        :2021/02/14
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
+ * @Data :2021/02/14
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
  * @Description :Build 核心任务，由 BuildTask 调用
  */
 
@@ -90,6 +90,7 @@ class BuildKernel {
 
     /**
      * 标准构造器，传入 EditTask，根据该提交任务执行工作
+     *
      * @param task 待执行任务
      */
     BuildKernel(final BuildTask task) throws IOException {
@@ -191,10 +192,15 @@ class BuildKernel {
         }
 
         /* 校验标题行 */
-        Assert.that((localLineCache.cacheOf(0) == ByteCode.NUMBER_SIGN) && localLineCache.size() > 46, GBCExceptionOptions.FileFormatException, "doesn't match to standard VCF file");
+        Assert.that((localLineCache.cacheOf(0) == ByteCode.NUMBER_SIGN) && localLineCache.size() >= 45, GBCExceptionOptions.FileFormatException, "doesn't match to standard VCF file (#CHROM POS ID REF ALT QUAL FILTER INFO FORMAT <S1 ...>)");
 
         // 样本名信息
-        byte[] subjects = localLineCache.endWith(ByteCode.CARRIAGE_RETURN) ? localLineCache.takeOut(46, localLineCache.size() - 47) : localLineCache.takeOut(46);
+        byte[] subjects;
+        if (localLineCache.size() == 45) {
+            subjects = new byte[0];
+        } else {
+            subjects = localLineCache.takeOut(46);
+        }
 
         // 如果第一个模版变量没有数据，则填充
         GroupSubjectFormatter subjectManager = new GroupSubjectFormatter(subjects);
@@ -333,6 +339,7 @@ class BuildKernel {
 
     /**
      * 编码基因型数据
+     *
      * @param formatter 外部格式匹配器
      */
     boolean formatVariant(final VolumeByteStream lineCache, final VariantAbstract variant, final byte[] encodedCache, final GenotypeQC formatter, final int chromosomeIndex) {
@@ -369,83 +376,80 @@ class BuildKernel {
             variant.encoderIndex = allelesNum == 2 ? 0 : 1;
 
             // 加载基因型格式化匹配器
-            int[] indexes = formatter.load(lineCache, formatStart, genotypeStart);
+            if (genotypeStart != -1) {
+                int[] indexes = formatter.load(lineCache, formatStart, genotypeStart);
 
-            /* 根据是否仅有 GT，决定是否需要进行过滤 */
-            if (lineCache.endWith(ByteCode.CARRIAGE_RETURN)) {
-                // 重设换行符类型
-                lineCache.reset(lineCache.size() - 1);
-            }
+                /* 根据是否仅有 GT，决定是否需要进行过滤 */
+                if (indexes == null) {
+                    int length;
+                    int seek = genotypeStart;
 
-            if (indexes == null) {
-                int length;
-                int seek = genotypeStart;
+                    for (int i = 0; i < this.validSubjectNum - 1; i++) {
+                        length = 1;
+                        seek += 2;
 
-                for (int i = 0; i < this.validSubjectNum - 1; i++) {
-                    length = 1;
-                    seek += 2;
-
-                    while (lineCache.cacheOf(seek) != ByteCode.TAB) {
-                        seek++;
-                        length++;
-                    }
-
-                    encodedCache[variant.encodedStart + i] = this.begEncoder.encode(lineCache.getCache(), seek, length);
-                }
-
-                length = lineCache.size() - seek - 1;
-                seek = lineCache.size();
-                encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encode(lineCache.getCache(), seek, length);
-            } else {
-                int length, mark, genotypeLength;
-                int seek = genotypeStart;
-
-                for (int i = 0; i < this.validSubjectNum - 1; i++) {
-                    length = 1;
-                    seek += 2;
-
-                    // 当前基因型是否为 .
-                    if (lineCache.cacheOf(seek - length) == ByteCode.PERIOD) {
-                        encodedCache[variant.encodedStart + i] = this.begEncoder.encodeMiss();
-                        seek = lineCache.indexOf(ByteCode.TAB, seek);
-                    } else {
-                        // 检测 :
-                        while (lineCache.cacheOf(seek) != ByteCode.COLON) {
-                            seek++;
-                            length++;
-                        }
-
-                        mark = seek;
-                        genotypeLength = length;
-
-                        // 检测 tab 分隔符
                         while (lineCache.cacheOf(seek) != ByteCode.TAB) {
                             seek++;
                             length++;
                         }
 
-                        encodedCache[variant.encodedStart + i] = this.begEncoder.encode(formatter.filter(lineCache, seek, length, indexes), lineCache.getCache(), mark, genotypeLength);
+                        encodedCache[variant.encodedStart + i] = this.begEncoder.encode(lineCache.getCache(), seek, length);
                     }
-                }
 
-                // 最后一个基因型数据
-                genotypeLength = 1;
-                mark = seek + 2;
-
-                // 当前基因型是否为 .
-                if (lineCache.cacheOf(mark - genotypeLength) == ByteCode.PERIOD) {
-                    encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encodeMiss();
-                } else {
                     length = lineCache.size() - seek - 1;
                     seek = lineCache.size();
+                    encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encode(lineCache.getCache(), seek, length);
+                } else {
+                    int length, mark, genotypeLength;
+                    int seek = genotypeStart;
 
-                    // 检测 :
-                    while (lineCache.cacheOf(mark) != ByteCode.COLON) {
-                        mark++;
-                        genotypeLength++;
+                    for (int i = 0; i < this.validSubjectNum - 1; i++) {
+                        length = 1;
+                        seek += 2;
+
+                        // 当前基因型是否为 .
+                        if (lineCache.cacheOf(seek - length) == ByteCode.PERIOD) {
+                            encodedCache[variant.encodedStart + i] = this.begEncoder.encodeMiss();
+                            seek = lineCache.indexOf(ByteCode.TAB, seek);
+                        } else {
+                            // 检测 :
+                            while (lineCache.cacheOf(seek) != ByteCode.COLON) {
+                                seek++;
+                                length++;
+                            }
+
+                            mark = seek;
+                            genotypeLength = length;
+
+                            // 检测 tab 分隔符
+                            while (lineCache.cacheOf(seek) != ByteCode.TAB) {
+                                seek++;
+                                length++;
+                            }
+
+                            encodedCache[variant.encodedStart + i] = this.begEncoder.encode(formatter.filter(lineCache, seek, length, indexes), lineCache.getCache(), mark, genotypeLength);
+                        }
                     }
 
-                    encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encode(formatter.filter(lineCache, seek, length, indexes), lineCache.getCache(), mark, genotypeLength);
+                    // 最后一个基因型数据
+                    genotypeLength = 1;
+                    mark = seek + 2;
+
+                    // 当前基因型是否为 .
+                    if (lineCache.cacheOf(mark - genotypeLength) == ByteCode.PERIOD) {
+                        encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encodeMiss();
+                    } else {
+                        length = lineCache.size() - seek - 1;
+                        seek = lineCache.size();
+
+                        // 检测 :
+                        while (lineCache.cacheOf(mark) != ByteCode.COLON) {
+                            mark++;
+                            genotypeLength++;
+                        }
+
+                        encodedCache[variant.encodedStart + this.validSubjectNum - 1] = this.begEncoder.encode(formatter.filter(lineCache, seek, length, indexes), lineCache.getCache(), mark, genotypeLength);
+                    }
                 }
             }
 

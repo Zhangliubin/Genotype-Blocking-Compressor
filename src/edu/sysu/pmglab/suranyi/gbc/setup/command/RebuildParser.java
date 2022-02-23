@@ -7,6 +7,7 @@ import edu.sysu.pmglab.suranyi.commandParser.converter.array.StringArrayConverte
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.KVConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalDoubleRangeConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.map.NaturalIntRangeConverter;
+import edu.sysu.pmglab.suranyi.commandParser.converter.map.RangeWithIndexConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.DoubleConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.IntConverter;
 import edu.sysu.pmglab.suranyi.commandParser.converter.value.PassedInConverter;
@@ -17,17 +18,22 @@ import edu.sysu.pmglab.suranyi.commandParser.validator.EnsureFileExistsValidator
 import edu.sysu.pmglab.suranyi.commandParser.validator.EnsureFileIsNotDirectoryValidator;
 import edu.sysu.pmglab.suranyi.commandParser.validator.RangeValidator;
 import edu.sysu.pmglab.suranyi.compressor.ICompressor;
+import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.ITask;
 import edu.sysu.pmglab.suranyi.gbc.core.build.BlockSizeParameter;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
+import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.LDTestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleACController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleAFController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleANController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.switcher.ISwitcher;
+import edu.sysu.pmglab.suranyi.unifyIO.FileStream;
 
+import java.io.IOException;
 import java.util.HashMap;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
@@ -162,33 +168,80 @@ enum RebuildParser {
                 .convertTo(new PassedInConverter())
                 .setOptionGroup("Compressor Options")
                 .setDescription("Overwrite output file without asking.");
+        parser.register("--multiallelic")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Normalize Variants Options")
+                .setDescription("Join multiple biallelic variants with the same coordinate for a multiallelic variant.");
+        parser.register("--biallelic")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Normalize Variants Options")
+                .setDescription("Split multiallelic variants into multiple biallelic variants.");
         parser.register("--align")
                 .arity(1)
                 .convertTo(new StringConverter())
                 .validateWith(EnsureFileExistsValidator.INSTANCE, EnsureFileIsNotDirectoryValidator.INSTANCE)
-                .setOptionGroup("Alignment Coordinates")
+                .setOptionGroup("Alignment Coordinate Options")
                 .setDescription("Filter coordinates and adjust reference base pairs according to the specified GTB file.")
                 .setFormat("'--align <file>'");
         parser.register("--check-allele")
                 .arity(0)
                 .convertTo(new PassedInConverter())
-                .setOptionGroup("Alignment Coordinates")
-                .setDescription("Correct for potential complementary strand errors based on allele frequency (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("Correct for potential complementary strand errors based on allele labels (A and C, T and G; only biallelic variants are supported). InputFiles will be resorted according the samples number of each GTB File.");
         parser.register("--p-value")
                 .arity(1)
                 .convertTo(new DoubleConverter())
                 .defaultTo(Chi2TestChecker.DEFAULT_ALPHA)
                 .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Alignment Coordinates")
-                .setDescription("Correct allele of variants (potential complementary strand errors) with the p-value of chi^2 test >= --p-value.")
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("Correct allele labels of rare variants (minor allele frequency < --maf) with the p-value of chi^2 test >= --p-value.")
                 .setFormat("'--p-value <float, 0.000001~0.5>'");
         parser.register("--freq-gap")
                 .arity(1)
                 .convertTo(new DoubleConverter())
                 .validateWith(new RangeValidator(1e-6, 0.5))
-                .setOptionGroup("Alignment Coordinates")
-                .setDescription("Correct allele of variants (potential complementary strand errors) with the allele frequency gap >= --freq-gap.")
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("Correct allele labels of rare variants (minor allele frequency < --maf) with the allele frequency gap >= --freq-gap.")
                 .setFormat("'--freq-gap <float, 0.000001~0.5>'");
+        parser.register("--no-ld")
+                .arity(0)
+                .convertTo(new PassedInConverter())
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("By default, correct allele labels of common variants (minor allele frequency >= --maf) using the ld pattern in different files. Disable this function with option '--no-ld'.");
+        parser.register("--min-r")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(LDTestChecker.DEFAULT_R_VALUE)
+                .validateWith(new RangeValidator(0.5, 1.0))
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("Exclude pairs with genotypic LD correlation |R| values less than --min-r.")
+                .setFormat("'--min-r <float, 0.5~1.0>'");
+        parser.register("--flip-scan-threshold")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(LDTestChecker.DEFAULT_ALPHA)
+                .validateWith(new RangeValidator(0.5, 1.0))
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("Variants with flipped ld patterns (strong correlation coefficients of opposite signs) that >= threshold ratio will be corrected.")
+                .setFormat("'--flip-scan-threshold <float, 0.5~1.0>'");
+        parser.register("--maf")
+                .arity(1)
+                .convertTo(new DoubleConverter())
+                .defaultTo(AlleleChecker.DEFAULT_MAF)
+                .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("For common variants (minor allele frequency >= --maf) use LD to identify inconsistent allele labels.")
+                .setFormat("'--maf <float, 0~1>'");
+        parser.register("--window-bp", "-bp")
+                .arity(1)
+                .convertTo(new IntConverter())
+                .defaultTo(LDTestChecker.DEFAULT_WINDOW_SIZE_BP)
+                .validateWith(new RangeValidator(1, Integer.MAX_VALUE))
+                .setOptionGroup("Alignment Coordinate Options")
+                .setDescription("The maximum number of physical bases between the variants being calculated for LD.")
+                .setFormat("'-bp <int>' (>=1)");
         parser.register("--method", "-m")
                 .arity(1)
                 .convertTo(params -> {
@@ -200,7 +253,7 @@ enum RebuildParser {
                     return params[0].toLowerCase();
                 })
                 .defaultTo("intersection")
-                .setOptionGroup("Alignment Coordinates")
+                .setOptionGroup("Alignment Coordinates Options")
                 .setDescription("Method for handing coordinates in different files (union or intersection).")
                 .setFormat("'-m [union/intersection]'");
 
@@ -208,15 +261,15 @@ enum RebuildParser {
                 .arity(1)
                 .convertTo(new StringArrayConverter(","))
                 .setOptionGroup("Subset Selection Options")
-                .setDescription("Rebuild the GTB for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'.")
+                .setDescription("Retain the genotypes for the specified subjects. Subject name can be stored in a file with ',' delimited form, and pass in via '-s @file'.")
                 .setFormat("'-s <string>,<string>,...' or '-s @<file>'");
         parser.register("--delete")
                 .arity(1)
-                .convertTo(new KVConverter<Integer, int[]>("chrom", "node") {
+                .convertTo(new KVConverter<String, int[]>("chrom", "node") {
                     @Override
-                    public HashMap<Integer, int[]> convert(String... params) {
+                    public HashMap<String, int[]> convert(String... params) {
                         HashMap<String, String> KV = super.parseKV(params);
-                        HashMap<Integer, int[]> result = new HashMap<>();
+                        HashMap<String, int[]> result = new HashMap<>();
 
                         if (!KV.containsKey("chrom") || (KV.get("chrom") == null) || (KV.get("chrom").length() == 0)) {
                             throw new ParameterException("no chromosomes specified");
@@ -231,11 +284,11 @@ enum RebuildParser {
                                 }
 
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), nodeIndexes);
+                                    result.put(chromosome, nodeIndexes);
                                 }
                             } else {
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), null);
+                                    result.put(chromosome, null);
                                 }
                             }
                         }
@@ -247,11 +300,11 @@ enum RebuildParser {
                 .setFormat("'--delete chrom=<string>,<string>,...' or '--delete chrom=<string>,<string>,...;node=<int>,<int>,...'");
         parser.register("--retain")
                 .arity(1)
-                .convertTo(new KVConverter<Integer, int[]>("chrom", "node") {
+                .convertTo(new KVConverter<String, int[]>("chrom", "node") {
                     @Override
-                    public HashMap<Integer, int[]> convert(String... params) {
+                    public HashMap<String, int[]> convert(String... params) {
                         HashMap<String, String> KV = super.parseKV(params);
-                        HashMap<Integer, int[]> result = new HashMap<>();
+                        HashMap<String, int[]> result = new HashMap<>();
 
                         if (!KV.containsKey("chrom") || (KV.get("chrom") == null) || (KV.get("chrom").length() == 0)) {
                             throw new ParameterException("no chromosomes specified");
@@ -266,11 +319,11 @@ enum RebuildParser {
                                 }
 
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), nodeIndexes);
+                                    result.put(chromosome, nodeIndexes);
                                 }
                             } else {
                                 for (String chromosome : chromosomes) {
-                                    result.put(ChromosomeInfo.getIndex(chromosome), null);
+                                    result.put(chromosome, null);
                                 }
                             }
                         }
@@ -280,6 +333,78 @@ enum RebuildParser {
                 .setOptionGroup("Subset Selection Options")
                 .setDescription("Retain the specified GTBNodes.")
                 .setFormat("'--retain chrom=<string>,<string>,...' or '--retain chrom=<string>,<string>,...;node=<int>,<int>,...'");
+        parser.register("--range", "-r")
+                .arity(1)
+                .convertTo(params -> {
+                    RangeWithIndexConverter converter = new RangeWithIndexConverter();
+                    String[] range = converter.convert(params);
+                    return new Coordinate(range[0], range[1].length() == 0 ? 0 : Integer.parseInt(range[1]), range[2].length() == 0 ? Integer.MAX_VALUE : Integer.parseInt(range[2]));
+                })
+                .setOptionGroup("Subset Selection Options")
+                .setDescription("Retain the variants by range of coordinates.")
+                .setFormat("'-r <chrom>', '-r <chrom>:<start>-', '-r <chrom>:-<end>' or '-r <chrom>:<start>-<end>'");
+        parser.register("--random")
+                .arity(1)
+                .convertTo(params -> {
+                    Assert.that(params.length == 1);
+
+                    // 使用 HashSet 保存位点，实现去重效果
+                    HashMap<String, SmartList<Integer>> elementSet = new HashMap<>();
+                    HashMap<String, int[]> target = new HashMap<>();
+
+                    // 打开并读取文件
+                    try (FileStream fs = new FileStream(params[0])) {
+                        String line;
+                        String chromosome;
+                        int position;
+
+                        while ((line = fs.readLineToString()) != null) {
+                            String[] split = null;
+                            if (line.contains(",")) {
+                                split = line.split(",");
+                            } else if (line.contains(" ")) {
+                                split = line.split(" ");
+                            } else if (line.contains("\t")) {
+                                split = line.split("\t");
+                            }
+
+                            if ((split == null) || (split.length != 2)) {
+                                throw new ParameterException("couldn't convert " + line + " to 'chrom,pos' or 'chrom<\\t>position'");
+                            }
+
+                            chromosome = split[0];
+
+                            // 匹配 position
+                            position = Integer.parseInt(split[1]);
+                            if (!elementSet.containsKey(chromosome)) {
+                                elementSet.put(chromosome, new SmartList<>(1024, true));
+                            }
+                            elementSet.get(chromosome).add(position);
+                        }
+
+                        // 为位点排序
+                        for (String chromosomeN : elementSet.keySet()) {
+                            SmartList<Integer> positions = elementSet.get(chromosomeN);
+                            if ((positions != null) && (positions.size() > 0)) {
+                                // 元素去重
+                                positions.dropDuplicated();
+
+                                // 元素排序
+                                positions.sort(Integer::compare);
+
+                                // 提取最终结果
+                                target.put(chromosomeN, positions.toIntegerArray());
+                            }
+                        }
+
+                        return target;
+                    } catch (IOException e) {
+                        throw new ParameterException(e.getMessage());
+                    }
+                })
+                .setOptionGroup("Subset Selection Options")
+                .setDescription("Retain the variants by specified coordinates. (An inputFile is needed here, with each line contains 'chrom,position' or 'chrom<\\t> position'.")
+                .setFormat("'--random <file>'");
         parser.register("--seq-ac")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
@@ -318,8 +443,27 @@ enum RebuildParser {
         parser.registerRule("--level", "--readyParas", AT_MOST_ONE);
         parser.registerRule("--delete", "--retain", AT_MOST_ONE);
         parser.registerRule("--align", "--check-allele", PRECONDITION);
+        parser.registerRule("--align", "--method", PRECONDITION);
         parser.registerRule("--p-value", "--freq-gap", AT_MOST_ONE);
         parser.registerRule("--check-allele", "--freq-gap", PRECONDITION);
         parser.registerRule("--check-allele", "--p-value", PRECONDITION);
+        parser.registerRule("--check-allele", "--no-ld", PRECONDITION);
+        parser.registerRule("--check-allele", "--min-r", PRECONDITION);
+        parser.registerRule("--check-allele", "--flip-scan-threshold", PRECONDITION);
+        parser.registerRule("--check-allele", "--maf", PRECONDITION);
+        parser.registerRule("--check-allele", "--window-bp", PRECONDITION);
+        parser.registerRule("--biallelic", "--multiallelic", AT_MOST_ONE);
+        parser.registerRule("--biallelic", "--align", AT_MOST_ONE);
+        parser.registerRule("--multiallelic", "--align", AT_MOST_ONE);
+        parser.registerRule("--random", "--align", AT_MOST_ONE);
+        parser.registerRule("--random", "--biallelic", AT_MOST_ONE);
+        parser.registerRule("--random", "--multiallelic", AT_MOST_ONE);
+        parser.registerRule("--range", "--align", AT_MOST_ONE);
+        parser.registerRule("--range", "--biallelic", AT_MOST_ONE);
+        parser.registerRule("--range", "--multiallelic", AT_MOST_ONE);
+        parser.registerRule("--random", "--range", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--min-r", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--flip-scan-threshold", AT_MOST_ONE);
+        parser.registerRule("--no-ld", "--window-bp", AT_MOST_ONE);
     }
 }

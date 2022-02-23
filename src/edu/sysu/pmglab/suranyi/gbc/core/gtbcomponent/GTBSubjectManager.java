@@ -250,7 +250,11 @@ public class GTBSubjectManager {
      * 只能在内部调用，防止出错
      */
     private BiDict<String, Integer> initSubjectsIndex() {
-        return BiDict.of(new String(this.subjects).split("\t"));
+        if (this.subjects.length == 0) {
+            return BiDict.of(new String[0]);
+        } else {
+            return BiDict.of(new String(this.subjects).split("\t"));
+        }
     }
 
     /**
@@ -287,6 +291,10 @@ public class GTBSubjectManager {
      * 增加扩展字符的打印方法
      */
     public String toString(int prefixNum, int eachLineNumber) {
+        if (this.subjectNum == 0) {
+            return "";
+        }
+
         String[] subjectArray = new String(subjects).split("\t");
         StringBuilder builder = new StringBuilder(subjects.length);
         String prefix = StringUtils.copyN(" ", prefixNum);

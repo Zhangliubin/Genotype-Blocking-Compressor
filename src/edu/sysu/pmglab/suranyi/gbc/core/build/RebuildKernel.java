@@ -23,15 +23,13 @@ import edu.sysu.pmglab.suranyi.unifyIO.FileStream;
 import edu.sysu.pmglab.suranyi.unifyIO.options.FileOptions;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
+import java.util.*;
 
 /**
- * @Data        :2021/02/14
- * @Author      :suranyi
- * @Contact     :suranyi.sysu@gamil.com
- * @Description :Rebuild 核心任务，由 BuildTask 调用
+ * @Data :2021/02/14
+ * @Author :suranyi
+ * @Contact :suranyi.sysu@gamil.com
+ * @Description :排序方法，由 RebuildTask 调用
  */
 
 class RebuildKernel {
@@ -83,13 +81,148 @@ class RebuildKernel {
     final VariantQC variantQC;
     final AlleleQC alleleQC;
 
+    /**
+     * 线程池
+     */
+    final ThreadPool threadPool;
+
     boolean status;
 
     /**
      * 对外的提交方法，将任务提交至本类，进行压缩任务
      */
-    static void submit(RebuildTask task) throws IOException {
-        new RebuildKernel(task);
+    static void rebuildAll(RebuildTask task) throws IOException {
+        RebuildKernel kernel = new RebuildKernel(task);
+
+        // 创建 Input 线程
+        kernel.threadPool.submit(() -> {
+            try {
+                // 遍历染色体列表
+                for (int chromosomeIndex : kernel.manager.getChromosomeList()) {
+                    // 获取合并后的主根信息
+                    RebuildVariant[] root = kernel.createRebuildTree(chromosomeIndex);
+                    int resSize = root.length;
+                    int offset = 0;
+                    while (resSize > 0) {
+                        int variantToProcess = Math.min(kernel.blockSize, resSize);
+                        kernel.uncompressedPipLine.put(true, new Task(chromosomeIndex, ArrayUtils.copyOfRange(root, offset, offset + variantToProcess)));
+                        resSize -= variantToProcess;
+                        offset += variantToProcess;
+                    }
+                }
+
+                kernel.uncompressedPipLine.putStatus(kernel.task.getThreads(), false);
+            } catch (InterruptedException | IOException e) {
+                // e.printStackTrace();
+                throw new UnsupportedOperationException(e.getMessage());
+            }
+        });
+
+        kernel.run();
+    }
+
+    /**
+     * 对外的提交方法，将任务提交至本类，进行压缩任务
+     */
+    static void rebuildByChromosome(RebuildTask task, int... chromosomes) throws IOException {
+        RebuildKernel kernel = new RebuildKernel(task);
+
+        // 创建 Input 线程
+        kernel.threadPool.submit(() -> {
+            try {
+                // 遍历染色体列表
+                for (int chromosomeIndex : chromosomes) {
+                    if (kernel.manager.contain(chromosomeIndex)) {
+                        // 获取合并后的主根信息
+                        RebuildVariant[] root = kernel.createRebuildTree(chromosomeIndex);
+                        int resSize = root.length;
+                        int offset = 0;
+                        while (resSize > 0) {
+                            int variantToProcess = Math.min(kernel.blockSize, resSize);
+                            kernel.uncompressedPipLine.put(true, new Task(chromosomeIndex, ArrayUtils.copyOfRange(root, offset, offset + variantToProcess)));
+                            resSize -= variantToProcess;
+                            offset += variantToProcess;
+                        }
+                    }
+                }
+
+                kernel.uncompressedPipLine.putStatus(kernel.task.getThreads(), false);
+            } catch (InterruptedException | IOException e) {
+                // e.printStackTrace();
+                throw new UnsupportedOperationException(e.getMessage());
+            }
+        });
+
+        kernel.run();
+    }
+
+    /**
+     * 对外的提交方法，将任务提交至本类，进行压缩任务
+     */
+    static void rebuildByRange(RebuildTask task, int chromosomeIndex, int startPos, int endPos) throws IOException {
+        RebuildKernel kernel = new RebuildKernel(task);
+
+        // 创建 Input 线程
+        kernel.threadPool.submit(() -> {
+            try {
+                // 遍历染色体列表
+                if (kernel.manager.contain(chromosomeIndex)) {
+                    // 获取合并后的主根信息
+                    RebuildVariant[] root = kernel.createRebuildTree(chromosomeIndex, startPos, endPos);
+                    int resSize = root.length;
+                    int offset = 0;
+                    while (resSize > 0) {
+                        int variantToProcess = Math.min(kernel.blockSize, resSize);
+                        kernel.uncompressedPipLine.put(true, new Task(chromosomeIndex, ArrayUtils.copyOfRange(root, offset, offset + variantToProcess)));
+                        resSize -= variantToProcess;
+                        offset += variantToProcess;
+                    }
+                }
+
+                kernel.uncompressedPipLine.putStatus(kernel.task.getThreads(), false);
+            } catch (InterruptedException | IOException e) {
+                // e.printStackTrace();
+                throw new UnsupportedOperationException(e.getMessage());
+            }
+        });
+
+        kernel.run();
+    }
+
+    /**
+     * 对外的提交方法，将任务提交至本类，进行压缩任务
+     */
+    static <ChromosomeType> void rebuildByPosition(RebuildTask task, Map<ChromosomeType, int[]> chromosomeNodeIndexesUnknownType) throws IOException {
+        RebuildKernel kernel = new RebuildKernel(task);
+        HashMap<Integer, int[]> chromosomePositions = ChromosomeInfo.identifyChromosome(chromosomeNodeIndexesUnknownType);
+
+        // 创建 Input 线程
+        kernel.threadPool.submit(() -> {
+            try {
+                // 遍历染色体列表
+                for (int chromosomeIndex: chromosomePositions.keySet()) {
+                    if (kernel.manager.contain(chromosomeIndex)) {
+                        // 获取合并后的主根信息
+                        RebuildVariant[] root = kernel.createRebuildTree(chromosomeIndex, chromosomePositions.get(chromosomeIndex));
+                        int resSize = root.length;
+                        int offset = 0;
+                        while (resSize > 0) {
+                            int variantToProcess = Math.min(kernel.blockSize, resSize);
+                            kernel.uncompressedPipLine.put(true, new Task(chromosomeIndex, ArrayUtils.copyOfRange(root, offset, offset + variantToProcess)));
+                            resSize -= variantToProcess;
+                            offset += variantToProcess;
+                        }
+                    }
+                }
+
+                kernel.uncompressedPipLine.putStatus(kernel.task.getThreads(), false);
+            } catch (InterruptedException | IOException e) {
+                // e.printStackTrace();
+                throw new UnsupportedOperationException(e.getMessage());
+            }
+        });
+
+        kernel.run();
     }
 
     IndexPair[] initIndexPairs(GTBManager manager, SmartList<String> selectedSubjects) {
@@ -123,6 +256,7 @@ class RebuildKernel {
 
     /**
      * 标准构造器，传入 EditTask，根据该提交任务执行工作
+     *
      * @param task 待执行任务
      */
     RebuildKernel(RebuildTask task) throws IOException {
@@ -185,35 +319,13 @@ class RebuildKernel {
         this.uncompressedPipLine = new DynamicPipeline<>(task.getThreads() << 2);
 
         // 创建线程池
-        ThreadPool threadPool = new ThreadPool(this.task.getThreads() + 1);
+        this.threadPool = new ThreadPool(this.task.getThreads() + 1);
 
         // 确认是否需要进行向型转换
         this.phasedTransfer = !task.isPhased() && this.manager.isPhased();
+    }
 
-        // 创建 Input 线程
-        threadPool.submit(() -> {
-            try {
-                // 遍历染色体列表
-                for (int chromosomeIndex : manager.getChromosomeList()) {
-                    // 获取合并后的主根信息
-                    RebuildVariant[] root = createRebuildTree(chromosomeIndex);
-                    int resSize = root.length;
-                    int offset = 0;
-                    while (resSize > 0) {
-                        int variantToProcess = Math.min(blockSize, resSize);
-                        this.uncompressedPipLine.put(true, new Task(chromosomeIndex, ArrayUtils.copyOfRange(root, offset, offset + variantToProcess)));
-                        resSize -= variantToProcess;
-                        offset += variantToProcess;
-                    }
-                }
-
-                this.uncompressedPipLine.putStatus(this.task.getThreads(), false);
-            } catch (InterruptedException | IOException e) {
-                // e.printStackTrace();
-                throw new UnsupportedOperationException(e.getMessage());
-            }
-        });
-
+    void run() throws IOException {
         int[] eachLineSize = new int[2];
         int groupNum = manager.isPhased() ? 3 : 4;
 
@@ -245,7 +357,7 @@ class RebuildKernel {
     /**
      * 创建合并树
      */
-    public RebuildVariant[] createRebuildTree(int chromosomeIndex) throws IOException {
+    RebuildVariant[] createRebuildTree(int chromosomeIndex) throws IOException {
         RebuildVariant[] root = new RebuildVariant[manager.getGtbTree().numOfVariants(chromosomeIndex)];
         VolumeByteStream undecompressedCache = new VolumeByteStream();
         VolumeByteStream decompressedPosCache = new VolumeByteStream(blockSize << 2);
@@ -313,7 +425,181 @@ class RebuildKernel {
         decompressedPosCache.close();
         decompressedAllelesCache.close();
 
-        // root 构建完成后，先确保数据非空，再排序ƒ
+        // root 构建完成后，先确保数据非空，再排序
+        if (variantIndex < root.length) {
+            root = ArrayUtils.copyOfRange(root, 0, variantIndex);
+        }
+        ArrayUtils.sort(root, Comparator.comparingInt(o -> o.position));
+
+        return root;
+    }
+
+
+    /**
+     * 创建合并树
+     */
+    RebuildVariant[] createRebuildTree(int chromosomeIndex, int[] positions) throws IOException {
+        RebuildVariant[] root = new RebuildVariant[manager.getGtbTree().numOfVariants(chromosomeIndex)];
+        VolumeByteStream undecompressedCache = new VolumeByteStream();
+        VolumeByteStream decompressedPosCache = new VolumeByteStream(blockSize << 2);
+        VolumeByteStream decompressedAllelesCache = new VolumeByteStream(maxOriginAllelesSize);
+        HashSet<Integer> validPositions = ArrayUtils.toSet(positions);
+        GTBNodes nodes;
+
+        nodes = manager.getGTBNodes(chromosomeIndex);
+        int variantIndex = 0;
+
+        // 位置解压器
+        FileStream fileStream = manager.getFileStream();
+        IDecompressor decompressor = IDecompressor.getInstance(manager.getCompressorIndex());
+
+        for (int i = 0; i < nodes.numOfNodes(); i++) {
+            GTBNode node = nodes.get(i);
+            decompressedAllelesCache.reset();
+            decompressedPosCache.reset();
+            undecompressedCache.reset();
+            undecompressedCache.makeSureCapacity(node.compressedAlleleSize, node.compressedPosSize);
+
+            // 读取压缩后的位置数据
+            fileStream.seek(node.blockSeek + node.compressedGenotypesSize);
+            fileStream.read(undecompressedCache, node.compressedPosSize);
+            decompressor.decompress(undecompressedCache, decompressedPosCache);
+            undecompressedCache.reset();
+
+            // 读取压缩后的位置数据
+            fileStream.read(undecompressedCache, node.compressedAlleleSize);
+            decompressor.decompress(undecompressedCache, decompressedAllelesCache);
+
+            int startPos;
+            int endPos = -1;
+
+            // 还原位置数据，并构建红黑树表
+            for (int j = 0; j < node.numOfVariants(); j++) {
+                // 设置等位基因数据
+                startPos = endPos;
+                endPos = decompressedAllelesCache.indexOfN(ByteCode.SLASH, startPos + 1, 1);
+
+                // 还原位置值
+                int position = ValueUtils.byteArray2IntegerValue(decompressedPosCache.cacheOf(j << 2),
+                        decompressedPosCache.cacheOf(1 + (j << 2)),
+                        decompressedPosCache.cacheOf(2 + (j << 2)),
+                        decompressedPosCache.cacheOf(3 + (j << 2)));
+
+                if (!validPositions.contains(position)) {
+                    continue;
+                }
+
+                // 执行等位基因过滤
+                byte[] alleles = decompressedAllelesCache.cacheOf(startPos + 1, endPos);
+
+                // 需要进行位点过滤
+                int allelesNum = 2;
+                for (int k = 3; k < alleles.length; k++) {
+                    if (alleles[k] == ByteCode.COMMA) {
+                        allelesNum += 1;
+                    }
+                }
+
+                if (!this.variantQC.filter(null, allelesNum, 0, 0, 0, 0)) {
+                    root[variantIndex++] = new RebuildVariant(position, allelesNum, alleles, i, j);
+                }
+            }
+        }
+        fileStream.close();
+
+        undecompressedCache.close();
+        decompressedPosCache.close();
+        decompressedAllelesCache.close();
+
+        // root 构建完成后，先确保数据非空，再排序
+        if (variantIndex < root.length) {
+            root = ArrayUtils.copyOfRange(root, 0, variantIndex);
+        }
+        ArrayUtils.sort(root, Comparator.comparingInt(o -> o.position));
+
+        return root;
+    }
+
+    /**
+     * 创建合并树
+     */
+    RebuildVariant[] createRebuildTree(int chromosomeIndex, int minPos, int maxPos) throws IOException {
+        GTBNodes nodes;
+        nodes = manager.getGTBNodes(chromosomeIndex);
+
+        if (!nodes.intersectPos(minPos, maxPos)) {
+            return new RebuildVariant[0];
+        }
+
+        RebuildVariant[] root = new RebuildVariant[manager.getGtbTree().numOfVariants(chromosomeIndex)];
+        VolumeByteStream undecompressedCache = new VolumeByteStream();
+        VolumeByteStream decompressedPosCache = new VolumeByteStream(blockSize << 2);
+        VolumeByteStream decompressedAllelesCache = new VolumeByteStream(maxOriginAllelesSize);
+        int variantIndex = 0;
+
+        // 位置解压器
+        FileStream fileStream = manager.getFileStream();
+        IDecompressor decompressor = IDecompressor.getInstance(manager.getCompressorIndex());
+
+        for (int i = 0; i < nodes.numOfNodes(); i++) {
+            GTBNode node = nodes.get(i);
+            decompressedAllelesCache.reset();
+            decompressedPosCache.reset();
+            undecompressedCache.reset();
+            undecompressedCache.makeSureCapacity(node.compressedAlleleSize, node.compressedPosSize);
+
+            // 读取压缩后的位置数据
+            fileStream.seek(node.blockSeek + node.compressedGenotypesSize);
+            fileStream.read(undecompressedCache, node.compressedPosSize);
+            decompressor.decompress(undecompressedCache, decompressedPosCache);
+            undecompressedCache.reset();
+
+            // 读取压缩后的位置数据
+            fileStream.read(undecompressedCache, node.compressedAlleleSize);
+            decompressor.decompress(undecompressedCache, decompressedAllelesCache);
+
+            int startPos;
+            int endPos = -1;
+
+            // 还原位置数据，并构建红黑树表
+            for (int j = 0; j < node.numOfVariants(); j++) {
+                // 设置等位基因数据
+                startPos = endPos;
+                endPos = decompressedAllelesCache.indexOfN(ByteCode.SLASH, startPos + 1, 1);
+
+                // 还原位置值
+                int position = ValueUtils.byteArray2IntegerValue(decompressedPosCache.cacheOf(j << 2),
+                        decompressedPosCache.cacheOf(1 + (j << 2)),
+                        decompressedPosCache.cacheOf(2 + (j << 2)),
+                        decompressedPosCache.cacheOf(3 + (j << 2)));
+
+                if (position < minPos || position > maxPos) {
+                    continue;
+                }
+
+                // 执行等位基因过滤
+                byte[] alleles = decompressedAllelesCache.cacheOf(startPos + 1, endPos);
+
+                // 需要进行位点过滤
+                int allelesNum = 2;
+                for (int k = 3; k < alleles.length; k++) {
+                    if (alleles[k] == ByteCode.COMMA) {
+                        allelesNum += 1;
+                    }
+                }
+
+                if (!this.variantQC.filter(null, allelesNum, 0, 0, 0, 0)) {
+                    root[variantIndex++] = new RebuildVariant(position, allelesNum, alleles, i, j);
+                }
+            }
+        }
+        fileStream.close();
+
+        undecompressedCache.close();
+        decompressedPosCache.close();
+        decompressedAllelesCache.close();
+
+        // root 构建完成后，先确保数据非空，再排序
         if (variantIndex < root.length) {
             root = ArrayUtils.copyOfRange(root, 0, variantIndex);
         }

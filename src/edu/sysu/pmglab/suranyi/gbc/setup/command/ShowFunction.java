@@ -120,11 +120,11 @@ enum ShowFunction {
                                 return builder.toString();
                             }
                         });
-                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN() + gtInfo);
+                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + String.format("%.8f", variant.getAF()) + ";AN=" + variant.getAN() + gtInfo);
                     }
                 } else {
                     for (Variant variant : reader) {
-                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + variant.getAF() + ";AN=" + variant.getAN());
+                        System.out.println(variant.chromosome + "\t" + variant.position + "\t" + new String(variant.REF) + "\t" + new String(variant.ALT) + "\tAC=" + variant.getAC() + ";AF=" + String.format("%.8f", variant.getAF()) + ";AN=" + variant.getAN());
                     }
                 }
 

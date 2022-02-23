@@ -403,11 +403,4 @@ public abstract class IBuildTask implements ITask {
 
         return this;
     }
-
-    /**
-     * 提交任务
-     */
-    public void submit() throws IOException {
-
-    }
 }

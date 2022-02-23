@@ -90,7 +90,7 @@ enum IndexFunction {
                     }
                 }
 
-                ChromosomeInfo.build((String) options.get("index"), realOutputFileName + ".~$temp");
+                ChromosomeInfo.build((String) options.get("index"), realOutputFileName + ".~$temp", options.isPassedIn("--deep-scan"));
                 FileUtils.rename(realOutputFileName + ".~$temp", realOutputFileName);
             }
         }

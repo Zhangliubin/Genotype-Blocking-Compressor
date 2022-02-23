@@ -1,0 +1,13 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##source=/Users/suranyi/Documents/project/GBC/GBC-1.1/example/assoc.hg19.unphased.gtb
+##Version=<gbc_version=1.1,java_version=17.0.1,zstd_jni=1.4.9-5>
+##reference=ftp://ftp.1000genomes.ebi.ac.uk//vol1/ftp/technical/reference/phase2_reference_assembly_sequence/hs37d5.fa.gz
+##contig=<ID=2,length=242193529,URL=https://www.ncbi.nlm.nih.gov/grc/human/data?asm=GRCh38.p13>
+##INFO=<ID=AC,Number=A,Type=Integer,Description="Allele count in genotypes">
+##INFO=<ID=AN,Number=1,Type=Integer,Description="Total number of alleles in called genotypes">
+##INFO=<ID=AF,Number=A,Type=Float,Description="Allele Frequency">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	A	B	C	D	E
+1	10177	.	A	G	.	.	.	GT	1|1	1|1	1|1	0|0	0|0
+1	10178	.	A	G	.	.	.	GT	0|0	0|0	0|0	0|0	1|1

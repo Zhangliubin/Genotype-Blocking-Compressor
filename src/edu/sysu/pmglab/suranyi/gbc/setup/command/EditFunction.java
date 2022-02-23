@@ -54,12 +54,12 @@ enum EditFunction {
 
             if (options.isPassedIn("--delete")) {
                 // 按照位置删除
-                task.delete((HashMap<Integer, int[]>) options.get("--delete"));
+                task.delete((HashMap<String, int[]>) options.get("--delete"));
             }
 
             if (options.isPassedIn("--retain")) {
                 // 按照位置删除
-                task.retain((HashMap<Integer, int[]>) options.get("--retain"));
+                task.retain((HashMap<String, int[]>) options.get("--retain"));
             }
 
             if (options.isPassedIn("--concat")) {

@@ -5,7 +5,6 @@ import edu.sysu.pmglab.suranyi.check.ioexception.IOExceptionOptions;
 import edu.sysu.pmglab.suranyi.compressor.ICompressor;
 import edu.sysu.pmglab.suranyi.container.SmartList;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
-import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.exception.GBCExceptionOptions;
 import edu.sysu.pmglab.suranyi.gbc.core.gtbcomponent.GTBManager;
@@ -26,6 +25,7 @@ public class MergeTask extends IBuildTask {
     final SmartList<GTBManager> managers;
     AlleleChecker alleleChecker;
     boolean keepAll;
+    boolean convertToBiallelic = false;
 
     /**
      * 构造器
@@ -133,34 +133,7 @@ public class MergeTask extends IBuildTask {
         synchronized (this) {
             this.alleleChecker = checker;
         }
-        return this;
-    }
 
-    /**
-     * 检查 allele frequency 并进行校正
-     */
-    public MergeTask setAlleleChecker(boolean checkAf) {
-        synchronized (this) {
-            if (checkAf) {
-                this.alleleChecker = new Chi2TestChecker();
-            } else {
-                this.alleleChecker = null;
-            }
-        }
-        return this;
-    }
-
-    /**
-     * 检查 allele frequency 并进行校正
-     */
-    public MergeTask setAlleleChecker(boolean checkAf, double alpha) {
-        synchronized (this) {
-            if (checkAf) {
-                this.alleleChecker = new Chi2TestChecker(alpha);
-            } else {
-                this.alleleChecker = null;
-            }
-        }
         return this;
     }
 
@@ -193,9 +166,26 @@ public class MergeTask extends IBuildTask {
     }
 
     /**
+     * 转换为二等位基因位点
+     */
+    public MergeTask convertToBiallelic(boolean enable) {
+        synchronized (this) {
+            this.convertToBiallelic = enable;
+        }
+
+        return this;
+    }
+
+    /**
+     * 是否转为二等位基因位点
+     */
+    public boolean isConvertToBiallelic() {
+        return this.convertToBiallelic;
+    }
+
+    /**
      * 运行，并发控制
      */
-    @Override
     public void submit() throws IOException {
         synchronized (this) {
             if (this.outputFileName == null) {
@@ -240,6 +230,7 @@ public class MergeTask extends IBuildTask {
                 "\n\tcompressionLevel: " + this.compressionLevel + " (" + ICompressor.getCompressorName(this.getCompressor()) + ")" +
                 "\n\tsite selection: " + (this.keepAll ? "union" : "intersection") +
                 "\n\tcheck allele: " + (this.alleleChecker == null ? "false" : this.alleleChecker) +
+                "\n\tsplit multiallelic: " + this.convertToBiallelic +
                 (this.variantQC.size() == 0 ? "" : "\n\tvariantQC: " + this.variantQC.toString()) +
                 (this.alleleQC.size() == 0 ? "" : "\n\talleleQC: " + this.alleleQC.toString()) +
                 "\n}";
