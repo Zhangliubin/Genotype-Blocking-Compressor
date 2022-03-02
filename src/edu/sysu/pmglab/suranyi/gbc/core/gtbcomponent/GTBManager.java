@@ -103,6 +103,14 @@ public class GTBManager {
     }
 
     /**
+     * 重设重叠群信息
+     * @param resourceName 资源文件
+     */
+    public void resetContig(String resourceName) throws IOException {
+        this.gtbTree.resetContig(resourceName);
+    }
+
+    /**
      * 获取染色体列表
      */
     public int[] getChromosomeList() {

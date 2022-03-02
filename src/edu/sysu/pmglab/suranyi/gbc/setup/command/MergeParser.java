@@ -19,18 +19,14 @@ import edu.sysu.pmglab.suranyi.gbc.coder.CoderConfig;
 import edu.sysu.pmglab.suranyi.gbc.constant.ChromosomeInfo;
 import edu.sysu.pmglab.suranyi.gbc.core.ITask;
 import edu.sysu.pmglab.suranyi.gbc.core.build.BlockSizeParameter;
-import edu.sysu.pmglab.suranyi.gbc.core.build.BuildTask;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.AlleleChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.Chi2TestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.allelechecker.LDTestChecker;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleACController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleAFController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.AlleleANController;
-import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.allele.IAlleleQC;
 import edu.sysu.pmglab.suranyi.gbc.core.common.qualitycontrol.variant.VariantAllelesNumController;
 import edu.sysu.pmglab.suranyi.gbc.core.common.switcher.ISwitcher;
-
-import java.io.IOException;
 
 import static edu.sysu.pmglab.suranyi.commandParser.CommandOptions.*;
 import static edu.sysu.pmglab.suranyi.commandParser.CommandRuleType.AT_MOST_ONE;
@@ -245,21 +241,21 @@ enum MergeParser {
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleACController.MIN, AlleleACController.MAX))
                 .setOptionGroup("Variant Selection Options")
-                .setDescription("Exclude variants with the minimal alternate allele count per variant out of the range [minAc, maxAc].")
+                .setDescription("Exclude variants with the alternate allele count (AC) per variant out of the range [minAc, maxAc].")
                 .setFormat("'--seq-ac <minAc>-', '--seq-ac -<maxAc>' or '--seq-ac <minAc>-<maxAc>' (minAc and maxAc are non-negative integers)");
         parser.register("--seq-af")
                 .arity(1)
                 .convertTo(new NaturalDoubleRangeConverter())
                 .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
                 .setOptionGroup("Variant Selection Options")
-                .setDescription("Exclude variants with the minimal alternate allele frequency per variant out of the range [minAf, maxAf].")
+                .setDescription("Exclude variants with the alternate allele frequency (AF) per variant out of the range [minAf, maxAf].")
                 .setFormat("'--seq-af <minAf>-', '--seq-af -<maxAf>' or '--seq-af <minAf>-<maxAf>' (minAf and maxAf are floating values between 0 and 1)");
         parser.register("--seq-an")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleANController.MIN, AlleleANController.MAX))
                 .setOptionGroup("Variant Selection Options")
-                .setDescription("Exclude variants with the minimum non-missing allele number per variant out of the range [minAn, maxAn].")
+                .setDescription("Exclude variants with the non-missing allele number (AN) per variant out of the range [minAn, maxAn].")
                 .setFormat("'--seq-an <minAn>-', '--seq-an -<maxAn>' or '--seq-an <minAn>-<maxAn>' (minAn and maxAn are non-negative integers)");
         parser.register("--max-allele")
                 .arity(1)
@@ -287,37 +283,5 @@ enum MergeParser {
         parser.registerRule("--no-ld", "--min-r", AT_MOST_ONE);
         parser.registerRule("--no-ld", "--flip-scan-threshold", AT_MOST_ONE);
         parser.registerRule("--no-ld", "--window-bp", AT_MOST_ONE);
-    }
-
-    public static void main(String[] args) throws IOException {
-// 压缩 assoc.hg19.vcf.gz 文件, 设置为有向，并自定义过滤器
-        BuildTask task = new BuildTask("./example/assoc.hg19.vcf.gz");
-        task.setPhased(true);
-        task.addAlleleQC(new IAlleleQC() {
-            @Override
-            public boolean filter(int alleleCount, int validAllelesNum) {
-                float alleleFreq = (float) alleleCount / validAllelesNum;
-                // compress variants with 0 < MAF < 0.05
-                return !((alleleFreq > 0 && alleleFreq < 0.05) || (alleleFreq < 1 && alleleFreq > 0.95));
-            }
-
-            @Override
-            public boolean empty() {
-                return false;
-            }
-        });
-        task.submit();
-
-// 压缩 1000GP3 分群体文件夹
-        for (String population : new String[]{"AFR", "AMR", "EAS", "EUR", "SAS"}) {
-            task = new BuildTask("./example/1000GP3/" + population);
-            task.submit();
-        }
-
-// 压缩 batchAll 文件，并设置质控参数为 gq >= 5, dp >= 30
-        task = new BuildTask("./example/batch.all", "./example/batch.all.filterGQ5_DP30.gtb")
-                .setGenotypeQualityControlDp(30)
-                .setGenotypeQualityControlGq(5);
-        task.submit();
     }
 }

@@ -246,21 +246,21 @@ enum ExtractParser {
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleACController.MIN, AlleleACController.MAX))
                 .setOptionGroup("Filter Options")
-                .setDescription("Set the minimum alternate allele count (AC) or the AC range and extract the corresponding information.")
+                .setDescription("Exclude variants with the alternate allele count (AC) per variant out of the range [minAc, maxAc].")
                 .setFormat("'--seq-ac <minAc>-', '--seq-ac -<maxAc>' or '--seq-ac <minAc>-<maxAc>' (minAc and maxAc are non-negative integers)");
         parser.register("--seq-af")
                 .arity(1)
                 .convertTo(new NaturalDoubleRangeConverter())
                 .validateWith(new RangeValidator(AlleleAFController.MIN, AlleleAFController.MAX))
                 .setOptionGroup("Filter Options")
-                .setDescription("Set the minimum alternate allele frequency (AF) or the AF range and extract the corresponding information.")
+                .setDescription("Exclude variants with the alternate allele frequency (AF) per variant out of the range [minAf, maxAf].")
                 .setFormat("'--seq-af <minAf>-', '--seq-af -<maxAf>' or '--seq-af <minAf>-<maxAf>' (minAf and maxAf are floating values between 0 and 1)");
         parser.register("--seq-an")
                 .arity(1)
                 .convertTo(new NaturalIntRangeConverter())
                 .validateWith(new RangeValidator(AlleleANController.MIN, AlleleANController.MAX))
                 .setOptionGroup("Filter Options")
-                .setDescription("Set the minimum non-missing allele number (AN) and extract the corresponding information.")
+                .setDescription("Exclude variants with the non-missing allele number (AN) per variant out of the range [minAn, maxAn].")
                 .setFormat("'--seq-an <minAn>-', '--seq-an -<maxAn>' or '--seq-an <minAn>-<maxAn>' (minAn and maxAn are non-negative integers)");
 
         // add commandRules

@@ -66,7 +66,7 @@ enum IndexFunction {
                 GTBManager manager = GTBRootCache.get((String) options.get("index"));
 
                 // 重设重叠群信息
-                manager.getGtbTree().resetContig((String) options.get("-to"));
+                manager.resetContig((String) options.get("-to"));
 
                 // 输出文件
                 manager.toFile(realOutputFileName + ".~$temp");
