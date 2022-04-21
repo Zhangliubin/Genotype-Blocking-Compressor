@@ -3,14 +3,43 @@ site_description: 基因型数据分块压缩器
 site_author: Suranyi
 site_url: https://pmglab.top/gbc/
 
+# 右上角仓库信息
+# repo_name: 'Genotype-Blocking-Compressor'
+repo_url: https://github.com/Zhangliubin/Genotype-Blocking-Compressor
+edit_uri: "" # 禁止页面编辑
+
 theme:
-  name: readthedocs
+  name: 'material'
+  logo: ''
+  favicon: ''
+  palette:
+    - scheme: default
+      accent: 'red'
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - scheme: slate
+      accent: 'red'
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
   feature:
     tabs: true
+  language: 'zh'
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - search.share
   font:
     text: 'Ubuntu'
     code: 'Ubuntu Mono'
-  language: 'zh'
+  custom_dir: 'theme'
+  icon:
+    repo: fontawesome/brands/github
 
 # 本地调试端口
 dev_addr: 127.0.0.1:4050
@@ -20,24 +49,20 @@ extra_javascript:
     - 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-MML-AM_CHTML'
 
 markdown_extensions:
+  - attr_list
+  - pymdownx.keys
+  - pymdownx.saneheaders
+  - pymdownx.tabbed
+  - pymdownx.details
+  - abbr
   - mdx_math
   - admonition
-  - codehilite:
-      guess_lang: true
-      linenums: true
-  - toc:
-      permalink: true
   - footnotes
   - meta
   - def_list
   - pymdownx.arithmatex
-  - pymdownx.betterem:
-      smart_enable: all
   - pymdownx.caret
   - pymdownx.critic
-  - pymdownx.details
-  - pymdownx.emoji:
-      emoji_generator: !!python/name:pymdownx.emoji.to_png
   - pymdownx.inlinehilite
   - pymdownx.magiclink
   - pymdownx.mark
@@ -45,11 +70,66 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tasklist
   - pymdownx.tilde
+  - toc:
+      permalink: ⚓︎
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:pymdownx.emoji.to_svg
+      options:
+        custom_icons:
+          - theme/.icons
+  - pymdownx.magiclink:
+      repo_url_shortener: true
+      repo_url_shorthand: true
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - codehilite:
+      guess_lang: true
+      linenums: true
+
+extra:
+  riskscanner:
+    version: v1.6.1
+  search:
+    separator: '[\s\-\.]+'
+    language: 'zh'
+    Content-Encoding: gzip
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Zhangliubin/Genotype-Blocking-Compressor
+    - icon: fontawesome/solid/envelope
+      link: mailto:suranyi.sysu@gmail.com
+    # 电话
+    # - icon: fontawesome/brands/skype
+    #   link: tel://400-052-0755
+    - icon: fontawesome/brands/qq
+      link: https://qm.qq.com/cgi-bin/qm/qr?k=VSfTWVsBOJBreaKGICzhZAAx8DQWUT3p&noverify=0
+ 
+# 版权信息
+copyright: <a href="http://pmglab.top/homepage/">Precision Medicine Genomics Laboratory (精准医学基因组学实验室)</a> <br/> <a href="http://zssom.sysu.edu.cn">Zhongshan School of Medicine</a>, <a href="http://www.sysu.edu.cn/cn/">Sun Yat-sen University</a>
+
+plugins:
+    - search
+    - macros
 
 nav:
-  - 中文介绍:
-    - 简介: cn/I.简介.md
-    - 安装和配置运行环境: cn/II.安装和配置运行环境.md
-    - 使用GBC处理基因型数据: cn/III.使用GBC处理基因型数据.md
-    - 命令行交互模式: cn/IV.命令行交互模式.md
-    - API文档: cn/V.API文档.md
+  - "About GBC": index.md
+  - Chinese:
+    - I. 简介: cn/I.Introduction.md
+    - II. 安装和配置运行环境: cn/II.Environment configuration and software installation.md
+    - III. 使用GBC处理基因型数据: cn/III.Handle the genotype data by GBC.md
+    - IV. 命令行交互模式: cn/IV.Command line interactive mode.md
+  - English:
+    - I. Introduction: en/I.Introduction.md
+    - II. Environment configuration and software installation: en/II.Environment configuration and software installation.md
+    - III. Handle the genotype data by GBC: en/III.Handle the genotype data by GBC.md
+    - IV. Command line interactive mode: en/IV.Command line interactive mode.md
+  - API-docs:
+    - I. GBC: api-docs/gbc/
+    - II. Utils: api-docs/utils

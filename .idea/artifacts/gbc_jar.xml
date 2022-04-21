@@ -1,0 +1,9 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="gbc:jar">
+    <output-path>$PROJECT_DIR$/</output-path>
+    <root id="archive" name="gbc.jar">
+      <element id="module-output" name="gbc" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/lib/commandParser-1.0.jar" path-in-jar="/" />
+    </root>
+  </artifact>
+</component>

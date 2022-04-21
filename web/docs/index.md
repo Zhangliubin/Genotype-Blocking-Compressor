@@ -1,17 +1,2 @@
-# Welcome to 
+Whole-genome sequencing projects of millions of subjects (particularly human beings) contain enormous genotypes, entailing a huge memory burden and time overhead during computation. Here, we present Genotype Blocking Compressor (GBC), a toolkit for rapidly compressing large-scale genotypes of a species into a fast-accessible format under an optimized parallelizable framework. We demonstrate that GBC is up to over 1000 times faster than state-of-the-art methods (e.g., GTC and BCFTools) to access and manage compressed large-scale genotype files (sorting, merging, splitting, etc.) while having a competitive compression ratio to save storage space. We also showed that conventional analysis would be substantially enhanced if integrated with GBC to access and process genotypes. Therefore, GBC's advanced data structure and algorithms will be very useful to accelerate future population-based biomedical research involving big genomics data.
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
-
-## Commands
-
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
-
-## Project layout
-
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
